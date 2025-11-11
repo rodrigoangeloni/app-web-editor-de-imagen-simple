@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Editor de Imágenes</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Editor de Imágenes</h1>
+        <div class="upload-area" id="dropZone">
+            <p>Arrastra tu imagen aquí o haz clic para seleccionar</p>
+            <input type="file" id="fileInput" accept="image/*">
+        </div>
+
+        <div class="editor-container">
+            <div class="image-container">
+                <img id="imagePreview" style="max-width: 100%;">
+                <div class="mask-container">
+                    <canvas id="maskPreview"></canvas>
+                </div>
+            </div>
+            <div class="controls">
+                <div class="control-group">
+                    <label for="quality">Calidad:</label>
+                    <input type="range" id="quality" min="1" max="100" value="90">
+                    <span id="qualityValue">90%</span>
+                </div>
+                <div class="control-group">
+                    <label for="format">Formato:</label>
+                    <select id="format">
+                        <option value="jpeg">JPEG</option>
+                        <option value="png">PNG</option>
+                        <option value="webp">WEBP</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Redimensionar:</label>
+                    <div class="size-controls">
+                        <div>
+                            <input type="number" id="width" placeholder="Ancho" min="1">
+                            <input type="number" id="height" placeholder="Alto" min="1">
+                        </div>
+                        <div>
+                            <select id="unit">
+                                <option value="px">Píxeles</option>
+                                <option value="cm">Centímetros</option>
+                            </select>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="keepAspect" checked> Mantener relación
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="control-group percent-control">
+                    <label for="percent">Escala (%):</label>
+                    <input type="number" id="percent" min="1" max="1000" value="100" style="width: 100px">
+                </div>
+                <div class="control-group">
+                    <label for="contrast">Contraste:</label>
+                    <input type="range" id="contrast" min="0" max="200" value="100">
+                    <span id="contrastValue">100%</span>
+                </div>
+                <div class="control-group">
+                    <label>Filtros:</label>
+                    <div class="filter-controls">
+                        <button id="filterNone" class="filter-btn active">Original</button>
+                        <button id="filterGrayscale" class="filter-btn">Escala de Grises</button>
+                        <button id="filterSepia" class="filter-btn">Sepia</button>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Eliminar fondo:</label>
+                    <div class="bg-remove-controls">
+                        <input type="color" id="bgColor" value="#ffffff">
+                        <input type="range" id="tolerance" min="0" max="100" value="10">
+                        <span id="toleranceValue">10%</span>
+                    </div>
+                </div>
+                <button id="downloadBtn">Descargar Imagen</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/compressorjs/1.1.1/compressor.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
