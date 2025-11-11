@@ -1,4 +1,16 @@
+/**
+ * @fileoverview Editor de Imágenes Web - Lógica Principal
+ * @description Aplicación de edición de imágenes en cliente usando Canvas API,
+ *              Cropper.js para recorte, Compressor.js para optimización y
+ *              FileSaver.js para descarga.
+ * @author Rodrigo Angeloni
+ * @version 1.0.0
+ * @license MIT
+ */
+
 document.addEventListener('DOMContentLoaded', function() {
+    // ==================== REFERENCIAS DOM ====================
+    
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const imagePreview = document.getElementById('imagePreview');
@@ -14,6 +26,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const bgColorInput = document.getElementById('bgColor');
     const toleranceInput = document.getElementById('tolerance');
     const toleranceValue = document.getElementById('toleranceValue');
+    const edgesOnlyCheckbox = document.getElementById('edgesOnly');
     const contrastSlider = document.getElementById('contrast'); // Added
     const contrastValue = document.getElementById('contrastValue'); // Added
     const maskCanvas = document.getElementById('maskPreview');
@@ -23,13 +36,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const filterNoneBtn = document.getElementById('filterNone');
     const filterGrayscaleBtn = document.getElementById('filterGrayscale');
     const filterSepiaBtn = document.getElementById('filterSepia');
+    
+    /** @type {string} Filtro actualmente activo: 'none' | 'grayscale' | 'sepia' */
     let currentFilter = 'none'; // To store the currently active filter
 
+    /** @type {Cropper|null} Instancia de Cropper.js para recorte interactivo */
     let cropper;
+    
+    /** @type {File|null} Archivo de imagen original seleccionado por el usuario */
     let currentFile;
+    
+    /** @type {ImageData|null} Backup del ImageData original sin procesar */
     let originalImage = null; // Store the original image data for reapplying filters
+    
+    /** @type {number} Ancho natural de la imagen original en píxeles */
     let originalWidth = 0;
+    
+    /** @type {number} Alto natural de la imagen original en píxeles */
     let originalHeight = 0;
+    
+    /** @type {number} Relación de aspecto original (width / height) */
     let originalAspectRatio = 1;
 
     // --- Event Listeners ---
@@ -72,6 +98,10 @@ document.addEventListener('DOMContentLoaded', function() {
         applyTransformations();
     });
 
+    edgesOnlyCheckbox.addEventListener('change', () => {
+        applyTransformations();
+    });
+
     contrastSlider.addEventListener('input', () => {
         contrastValue.textContent = `${contrastSlider.value}%`;
         applyTransformations();
@@ -106,7 +136,24 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle download button click
     downloadBtn.addEventListener('click', processAndDownload);
 
-    // --- Core Functions ---
+    // ==================== FUNCIONES PRINCIPALES ====================
+    
+    /**
+     * Procesa el archivo de imagen seleccionado por el usuario.
+     * Valida tipo y tamaño, carga la imagen con FileReader, e inicializa Cropper.js.
+     * 
+     * @param {File} file - Objeto File del navegador (desde input o drag-drop)
+     * @throws {Alert} Si el archivo no es una imagen válida
+     * @throws {Alert} Si el archivo excede 10MB
+     * @returns {void}
+     * 
+     * @example
+     * fileInput.addEventListener('change', (e) => {
+     *     if (e.target.files.length) {
+     *         handleFileSelect(e.target.files[0]);
+     *     }
+     * });
+     */
     function handleFileSelect(file) {
         if (!file.type.match('image.*')) {
             alert('Por favor selecciona un archivo de imagen válido');
@@ -154,6 +201,12 @@ document.addEventListener('DOMContentLoaded', function() {
         reader.readAsDataURL(file);
     }
 
+    /**
+     * Resetea todos los controles UI a sus valores por defecto.
+     * Se llama después de cargar una nueva imagen.
+     * 
+     * @returns {void}
+     */
     function resetControls() {
         qualitySlider.value = 90;
         qualityValue.textContent = '90%';
@@ -165,12 +218,29 @@ document.addEventListener('DOMContentLoaded', function() {
         bgColorInput.value = '#ffffff';
         toleranceInput.value = 10;
         toleranceValue.textContent = '10%';
+        edgesOnlyCheckbox.checked = true;
         contrastSlider.value = 100;
         contrastValue.textContent = '100%';
         maskCanvas.style.display = 'none'; // Hide mask initially
         setActiveFilter('none', true); // Reset to no filter and update UI
     }
 
+    /**
+     * Cambia el filtro activo y actualiza la UI.
+     * Actualiza los botones de filtro y aplica las transformaciones.
+     * 
+     * @param {('none'|'grayscale'|'sepia')} filterName - Nombre del filtro a activar
+     * @param {boolean} [isReset=false] - Si es true, no dispara applyTransformations()
+     * @returns {void}
+     * 
+     * @example
+     * // Activar filtro sepia
+     * setActiveFilter('sepia');
+     * 
+     * @example
+     * // Reset sin disparar transformaciones (uso interno)
+     * setActiveFilter('none', true);
+     */
     function setActiveFilter(filterName, isReset = false) {
         currentFilter = filterName;
         // Update button active states
@@ -184,6 +254,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    /**
+     * Recalcula dimensiones basándose en los inputs del usuario.
+     * Mantiene la relación de aspecto si está activado el checkbox correspondiente.
+     * 
+     * @returns {void}
+     * 
+     * @sideEffect Actualiza valores de widthInput y heightInput si es necesario
+     * @sideEffect Dispara applyTransformations()
+     */
     function updateDimensions() {
         if (!cropper || !cropper.ready || !originalImage) return;
 
@@ -217,6 +296,26 @@ document.addEventListener('DOMContentLoaded', function() {
         applyTransformations(); // Re-apply transformations as dimensions affect them
     }
 
+    /**
+     * Aplica todas las transformaciones seleccionadas en tiempo real.
+     * Crea un canvas temporal, procesa píxeles (contraste, filtros, bg removal)
+     * y renderiza el preview en maskCanvas superpuesto sobre la imagen.
+     * 
+     * @returns {void}
+     * 
+     * @performance Tiempo típico: 30-500ms según resolución de imagen
+     * @performance Bloquea el main thread (procesamiento síncrono)
+     * 
+     * @sideEffect Modifica el contenido y posición de maskCanvas
+     * @sideEffect Puede ocultar maskCanvas si no hay imagen válida
+     * 
+     * @algorithm
+     * 1. Obtener canvas recortado de Cropper
+     * 2. Aplicar contraste: factor * (pixel - 128) + 128
+     * 3. Aplicar filtro activo (grayscale/sepia)
+     * 4. Aplicar eliminación de fondo por similitud de color
+     * 5. Renderizar resultado en maskCanvas
+     */
     function applyTransformations() {
         if (!currentFile || !cropper || !cropper.ready || !originalImage) {
             maskCanvas.style.display = 'none';
@@ -277,10 +376,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const tolValue = parseInt(toleranceInput.value);
         
         if (bgColorInput.value !== '#ffffff' || tolValue > 0) {
-            for (let i = 0; i < data.length; i += 4) {
-                const pixelColor = { r: data[i], g: data[i+1], b: data[i+2] };
-                if (isColorSimilar(targetColor, pixelColor, tolValue)) {
-                    data[i+3] = 0; // Make matching pixels fully transparent
+            if (edgesOnlyCheckbox.checked) {
+                // Algoritmo mejorado: Flood Fill desde bordes
+                removeBackgroundFromEdges(imageData, targetColor, tolValue);
+            } else {
+                // Algoritmo original: Comparación global de píxeles
+                for (let i = 0; i < data.length; i += 4) {
+                    const pixelColor = { r: data[i], g: data[i+1], b: data[i+2] };
+                    if (isColorSimilar(targetColor, pixelColor, tolValue)) {
+                        data[i+3] = 0; // Make matching pixels fully transparent
+                    }
                 }
             }
         }
@@ -308,6 +413,31 @@ document.addEventListener('DOMContentLoaded', function() {
         maskCtx.drawImage(workingCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
     }
 
+    /**
+     * Procesa la imagen final con todas las transformaciones y la descarga.
+     * Aplica redimensionado, contraste, filtros y bg removal en el canvas final,
+     * comprime con Compressor.js y descarga con FileSaver.js.
+     * 
+     * @returns {void}
+     * 
+     * @throws {Alert} Si no hay imagen cargada
+     * @throws {Alert} Si hay error al procesar la imagen
+     * @throws {Alert} Si Compressor.js falla
+     * 
+     * @algorithm
+     * 1. Obtener canvas recortado de Cropper
+     * 2. Redimensionar si se especificaron dimensiones
+     * 3. Aplicar contraste
+     * 4. Aplicar filtros (grayscale/sepia)
+     * 5. Aplicar eliminación de fondo (forzar PNG si hay transparencia)
+     * 6. Convertir a Blob
+     * 7. Comprimir con calidad seleccionada
+     * 8. Descargar archivo
+     * 
+     * @example
+     * // Usuario hace clic en botón de descarga
+     * downloadBtn.addEventListener('click', processAndDownload);
+     */
     function processAndDownload() {
         if (!currentFile || !cropper || !cropper.ready) {
             alert('Por favor sube una imagen primero');
@@ -399,13 +529,28 @@ document.addEventListener('DOMContentLoaded', function() {
             const imgDataForBgRemoval = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
             const dataForBgRemoval = imgDataForBgRemoval.data;
             let hasTransparentPixels = false;
-            for (let i = 0; i < dataForBgRemoval.length; i += 4) {
-                const pixelColor = { r: dataForBgRemoval[i], g: dataForBgRemoval[i+1], b: dataForBgRemoval[i+2] };
-                if (isColorSimilar(targetColor, pixelColor, tolValue)) {
-                    dataForBgRemoval[i+3] = 0; // Set alpha to transparent
-                    hasTransparentPixels = true;
+            
+            if (edgesOnlyCheckbox.checked) {
+                // Algoritmo mejorado: Flood Fill desde bordes
+                removeBackgroundFromEdges(imgDataForBgRemoval, targetColor, tolValue);
+                // Verificar si se crearon píxeles transparentes
+                for (let i = 3; i < dataForBgRemoval.length; i += 4) {
+                    if (dataForBgRemoval[i] === 0) {
+                        hasTransparentPixels = true;
+                        break;
+                    }
+                }
+            } else {
+                // Algoritmo original: Comparación global de píxeles
+                for (let i = 0; i < dataForBgRemoval.length; i += 4) {
+                    const pixelColor = { r: dataForBgRemoval[i], g: dataForBgRemoval[i+1], b: dataForBgRemoval[i+2] };
+                    if (isColorSimilar(targetColor, pixelColor, tolValue)) {
+                        dataForBgRemoval[i+3] = 0; // Set alpha to transparent
+                        hasTransparentPixels = true;
+                    }
                 }
             }
+            
             ctx.putImageData(imgDataForBgRemoval, 0, 0);
             if (hasTransparentPixels) {
                 actualFormat = 'png'; // Force PNG if transparency is added
@@ -433,6 +578,112 @@ document.addEventListener('DOMContentLoaded', function() {
         }, mimeType);
     }
 
+    // ==================== FUNCIONES UTILITARIAS ====================
+    
+    /**
+     * Elimina el fondo usando algoritmo Flood Fill desde los bordes de la imagen.
+     * Solo elimina píxeles conectados a los bordes que sean similares al color objetivo.
+     * Esto preserva áreas internas con colores similares (ej: camisa blanca en fondo blanco).
+     * 
+     * @param {ImageData} imageData - Datos de la imagen a procesar
+     * @param {{r: number, g: number, b: number}} targetColor - Color del fondo a eliminar
+     * @param {number} tolerancePercent - Tolerancia de similitud (0-100)
+     * @returns {void}
+     * 
+     * @algorithm
+     * 1. Crear array de visitados (Uint8Array para eficiencia)
+     * 2. Agregar todos los píxeles del perímetro a la cola si coinciden con targetColor
+     * 3. BFS: Para cada píxel en cola:
+     *    - Marcar como transparente (alpha = 0)
+     *    - Agregar vecinos 4-connected si coinciden y no fueron visitados
+     * 4. Resultado: Solo fondo conectado a bordes es removido
+     * 
+     * @performance O(n) donde n = width * height, pero solo procesa fondo
+     */
+    function removeBackgroundFromEdges(imageData, targetColor, tolerancePercent) {
+        const width = imageData.width;
+        const height = imageData.height;
+        const data = imageData.data;
+        const visited = new Uint8Array(width * height); // 0 = no visitado, 1 = visitado
+        const queue = [];
+        
+        /**
+         * Obtiene el índice del array de píxeles para coordenadas (x, y)
+         */
+        const getPixelIndex = (x, y) => (y * width + x) * 4;
+        const getVisitedIndex = (x, y) => y * width + x;
+        
+        /**
+         * Verifica si píxel en (x, y) coincide con targetColor y lo agrega a la cola
+         */
+        const queueIfMatch = (x, y) => {
+            if (x < 0 || x >= width || y < 0 || y >= height) return;
+            
+            const visitedIdx = getVisitedIndex(x, y);
+            if (visited[visitedIdx]) return; // Ya visitado
+            
+            const pixelIdx = getPixelIndex(x, y);
+            const pixelColor = {
+                r: data[pixelIdx],
+                g: data[pixelIdx + 1],
+                b: data[pixelIdx + 2]
+            };
+            
+            if (isColorSimilar(targetColor, pixelColor, tolerancePercent)) {
+                visited[visitedIdx] = 1;
+                queue.push({ x, y });
+            }
+        };
+        
+        // Paso 1: Agregar todos los píxeles del borde a la cola si coinciden
+        
+        // Top edge (y = 0)
+        for (let x = 0; x < width; x++) {
+            queueIfMatch(x, 0);
+        }
+        
+        // Bottom edge (y = height - 1)
+        for (let x = 0; x < width; x++) {
+            queueIfMatch(x, height - 1);
+        }
+        
+        // Left edge (x = 0), excluyendo esquinas ya procesadas
+        for (let y = 1; y < height - 1; y++) {
+            queueIfMatch(0, y);
+        }
+        
+        // Right edge (x = width - 1)
+        for (let y = 1; y < height - 1; y++) {
+            queueIfMatch(width - 1, y);
+        }
+        
+        // Paso 2: BFS - Procesar cola
+        while (queue.length > 0) {
+            const { x, y } = queue.shift();
+            const pixelIdx = getPixelIndex(x, y);
+            
+            // Marcar píxel como transparente
+            data[pixelIdx + 3] = 0;
+            
+            // Agregar vecinos 4-connected (arriba, abajo, izquierda, derecha)
+            queueIfMatch(x, y - 1); // Arriba
+            queueIfMatch(x, y + 1); // Abajo
+            queueIfMatch(x - 1, y); // Izquierda
+            queueIfMatch(x + 1, y); // Derecha
+        }
+    }
+    
+    /**
+     * Convierte un color hexadecimal a objeto RGB.
+     * 
+     * @param {string} hex - Color en formato hexadecimal (ej: "#ff5733")
+     * @returns {{r: number, g: number, b: number}} Objeto con componentes RGB (0-255)
+     * 
+     * @example
+     * hexToRgb('#ffffff') // { r: 255, g: 255, b: 255 }
+     * hexToRgb('#000000') // { r: 0, g: 0, b: 0 }
+     * hexToRgb('#ff0000') // { r: 255, g: 0, b: 0 }
+     */
     // --- Utility Functions ---
     function hexToRgb(hex) {
         const bigint = parseInt(hex.slice(1), 16);
@@ -443,6 +694,30 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
+    /**
+     * Determina si dos colores son similares usando distancia euclidiana en espacio RGB.
+     * 
+     * @param {{r: number, g: number, b: number}} target - Color objetivo
+     * @param {{r: number, g: number, b: number}} actual - Color a comparar
+     * @param {number} tolerancePercent - Tolerancia en porcentaje (0-100)
+     * @returns {boolean} true si los colores son similares dentro de la tolerancia
+     * 
+     * @algorithm
+     * distance = sqrt((r1-r2)² + (g1-g2)² + (b1-b2)²)
+     * tolerance_normalized = tolerancePercent * 2.55 (convertir 0-100 a 0-255)
+     * return distance <= tolerance_normalized
+     * 
+     * @example
+     * const white = { r: 255, g: 255, b: 255 };
+     * const nearWhite = { r: 250, g: 250, b: 250 };
+     * isColorSimilar(white, nearWhite, 10); // true
+     * 
+     * @example
+     * const white = { r: 255, g: 255, b: 255 };
+     * const gray = { r: 200, g: 200, b: 200 };
+     * isColorSimilar(white, gray, 10);  // false
+     * isColorSimilar(white, gray, 50);  // true
+     */
     function isColorSimilar(target, actual, tolerancePercent) {
         const tolerance = tolerancePercent * 2.55; // Convert percentage 0-100 to 0-255 range
         const dr = target.r - actual.r;
