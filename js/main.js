@@ -4,11 +4,20 @@
  *              Cropper.js para recorte, Compressor.js para optimización y
  *              FileSaver.js para descarga.
  * @author Rodrigo Angeloni
- * @version 1.0.0
+ * @version 2.0.0
  * @license MIT
  */
 
 document.addEventListener('DOMContentLoaded', function() {
+    // ==================== CONFIGURACIÓN ====================
+    
+    const CONFIG = {
+        MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
+        DEBOUNCE_DELAY: 100, // ms
+        HISTORY_LIMIT: 20,
+        TOAST_DURATION: 3000 // ms
+    };
+
     // ==================== REFERENCIAS DOM ====================
     
     const dropZone = document.getElementById('dropZone');
@@ -27,18 +36,44 @@ document.addEventListener('DOMContentLoaded', function() {
     const toleranceInput = document.getElementById('tolerance');
     const toleranceValue = document.getElementById('toleranceValue');
     const edgesOnlyCheckbox = document.getElementById('edgesOnly');
-    const contrastSlider = document.getElementById('contrast'); // Added
-    const contrastValue = document.getElementById('contrastValue'); // Added
+    const contrastSlider = document.getElementById('contrast');
+    const contrastValue = document.getElementById('contrastValue');
+    const brightnessSlider = document.getElementById('brightness');
+    const brightnessValue = document.getElementById('brightnessValue');
+    const saturationSlider = document.getElementById('saturation');
+    const saturationValue = document.getElementById('saturationValue');
     const maskCanvas = document.getElementById('maskPreview');
     const maskCtx = maskCanvas.getContext('2d');
+
+    // Nuevos elementos UI
+    const toastContainer = document.getElementById('toastContainer');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingText = document.getElementById('loadingText');
+    const imageInfo = document.getElementById('imageInfo');
+    const infoDimensions = document.getElementById('infoDimensions');
+    const infoSize = document.getElementById('infoSize');
+    const infoFormat = document.getElementById('infoFormat');
+    
+    // Botones de rotación
+    const rotateLeftBtn = document.getElementById('rotateLeft');
+    const rotateRightBtn = document.getElementById('rotateRight');
+    const flipHBtn = document.getElementById('flipH');
+    const flipVBtn = document.getElementById('flipV');
+    
+    // Botones de acción
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+    const compareBtn = document.getElementById('compareBtn');
+    const resetBtn = document.getElementById('resetBtn');
 
     // Filter buttons
     const filterNoneBtn = document.getElementById('filterNone');
     const filterGrayscaleBtn = document.getElementById('filterGrayscale');
     const filterSepiaBtn = document.getElementById('filterSepia');
+    const filterInvertBtn = document.getElementById('filterInvert');
     
-    /** @type {string} Filtro actualmente activo: 'none' | 'grayscale' | 'sepia' */
-    let currentFilter = 'none'; // To store the currently active filter
+    /** @type {string} Filtro actualmente activo: 'none' | 'grayscale' | 'sepia' | 'invert' */
+    let currentFilter = 'none';
 
     /** @type {Cropper|null} Instancia de Cropper.js para recorte interactivo */
     let cropper;
@@ -47,7 +82,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentFile;
     
     /** @type {ImageData|null} Backup del ImageData original sin procesar */
-    let originalImage = null; // Store the original image data for reapplying filters
+    let originalImage = null;
     
     /** @type {number} Ancho natural de la imagen original en píxeles */
     let originalWidth = 0;
@@ -57,8 +92,241 @@ document.addEventListener('DOMContentLoaded', function() {
     
     /** @type {number} Relación de aspecto original (width / height) */
     let originalAspectRatio = 1;
+    
+    /** @type {number} Escala horizontal (1 o -1 para volteo) */
+    let scaleX = 1;
+    
+    /** @type {number} Escala vertical (1 o -1 para volteo) */
+    let scaleY = 1;
+    
+    /** @type {number} Timeout ID para debounce */
+    let debounceTimer = null;
+    
+    /** @type {Array} Historial de estados para undo */
+    let historyStack = [];
+    
+    /** @type {number} Índice actual en el historial */
+    let historyIndex = -1;
+    
+    /** @type {boolean} Flag para evitar guardar estado durante undo/redo */
+    let isUndoRedo = false;
 
-    // --- Event Listeners ---
+    // ==================== UTILIDADES UI ====================
+    
+    /**
+     * Muestra una notificación toast
+     * @param {string} message - Mensaje a mostrar
+     * @param {'success'|'error'|'warning'|'info'} type - Tipo de notificación
+     */
+    function showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        toastContainer.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.remove();
+        }, CONFIG.TOAST_DURATION);
+    }
+    
+    /**
+     * Muestra/oculta el overlay de carga
+     * @param {boolean} show - Mostrar u ocultar
+     * @param {string} text - Texto a mostrar
+     */
+    function setLoading(show, text = 'Procesando...') {
+        loadingText.textContent = text;
+        loadingOverlay.classList.toggle('hidden', !show);
+    }
+    
+    /**
+     * Actualiza la información de la imagen
+     */
+    function updateImageInfo() {
+        if (!currentFile || !cropper) {
+            imageInfo.classList.add('hidden');
+            return;
+        }
+        
+        const cropData = cropper.getData(true);
+        infoDimensions.textContent = `${cropData.width} × ${cropData.height} px`;
+        infoSize.textContent = formatFileSize(currentFile.size);
+        infoFormat.textContent = currentFile.type.split('/')[1]?.toUpperCase() || 'Unknown';
+        imageInfo.classList.remove('hidden');
+    }
+    
+    /**
+     * Formatea el tamaño de archivo en unidades legibles
+     * @param {number} bytes - Tamaño en bytes
+     * @returns {string} Tamaño formateado
+     */
+    function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+    
+    /**
+     * Habilita/deshabilita los controles que requieren imagen
+     * @param {boolean} enabled - Estado de habilitación
+     */
+    function setControlsEnabled(enabled) {
+        const controls = [
+            downloadBtn, rotateLeftBtn, rotateRightBtn, flipHBtn, flipVBtn,
+            compareBtn, resetBtn
+        ];
+        controls.forEach(btn => {
+            if (btn) btn.disabled = !enabled;
+        });
+        updateHistoryButtons();
+    }
+    
+    /**
+     * Actualiza el estado de los botones de historial
+     */
+    function updateHistoryButtons() {
+        if (undoBtn) undoBtn.disabled = historyIndex <= 0;
+        if (redoBtn) redoBtn.disabled = historyIndex >= historyStack.length - 1;
+    }
+
+    // ==================== SISTEMA DE HISTORIAL ====================
+    
+    /**
+     * Guarda el estado actual en el historial
+     */
+    function saveState() {
+        if (isUndoRedo || !cropper) return;
+        
+        const state = {
+            filter: currentFilter,
+            contrast: contrastSlider.value,
+            brightness: brightnessSlider.value,
+            saturation: saturationSlider.value,
+            bgColor: bgColorInput.value,
+            tolerance: toleranceInput.value,
+            edgesOnly: edgesOnlyCheckbox.checked,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            cropData: cropper.getData(),
+            quality: qualitySlider.value,
+            format: formatSelect.value,
+            width: widthInput.value,
+            height: heightInput.value,
+            percent: percentInput.value,
+            keepAspect: keepAspect.checked
+        };
+        
+        // Eliminar estados futuros si estamos en medio del historial
+        if (historyIndex < historyStack.length - 1) {
+            historyStack = historyStack.slice(0, historyIndex + 1);
+        }
+        
+        historyStack.push(state);
+        
+        // Limitar tamaño del historial
+        if (historyStack.length > CONFIG.HISTORY_LIMIT) {
+            historyStack.shift();
+        } else {
+            historyIndex++;
+        }
+        
+        updateHistoryButtons();
+    }
+    
+    /**
+     * Restaura un estado del historial
+     * @param {Object} state - Estado a restaurar
+     */
+    function restoreState(state) {
+        isUndoRedo = true;
+        
+        currentFilter = state.filter;
+        contrastSlider.value = state.contrast;
+        contrastValue.textContent = `${state.contrast}%`;
+        brightnessSlider.value = state.brightness;
+        brightnessValue.textContent = `${state.brightness}%`;
+        saturationSlider.value = state.saturation;
+        saturationValue.textContent = `${state.saturation}%`;
+        bgColorInput.value = state.bgColor;
+        toleranceInput.value = state.tolerance;
+        toleranceValue.textContent = `${state.tolerance}%`;
+        edgesOnlyCheckbox.checked = state.edgesOnly;
+        scaleX = state.scaleX;
+        scaleY = state.scaleY;
+        qualitySlider.value = state.quality;
+        qualityValue.textContent = `${state.quality}%`;
+        formatSelect.value = state.format;
+        widthInput.value = state.width;
+        heightInput.value = state.height;
+        percentInput.value = state.percent;
+        keepAspect.checked = state.keepAspect;
+        
+        // Actualizar botones de filtro
+        document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+        if (state.filter === 'none') filterNoneBtn.classList.add('active');
+        else if (state.filter === 'grayscale') filterGrayscaleBtn.classList.add('active');
+        else if (state.filter === 'sepia') filterSepiaBtn.classList.add('active');
+        else if (state.filter === 'invert') filterInvertBtn.classList.add('active');
+        
+        // Restaurar crop y escala
+        if (cropper) {
+            cropper.setData(state.cropData);
+            cropper.scaleX(scaleX);
+            cropper.scaleY(scaleY);
+        }
+        
+        applyTransformations();
+        isUndoRedo = false;
+    }
+    
+    /**
+     * Deshace el último cambio
+     */
+    function undo() {
+        if (historyIndex > 0) {
+            historyIndex--;
+            restoreState(historyStack[historyIndex]);
+            updateHistoryButtons();
+            showToast('Cambio deshecho', 'info');
+        }
+    }
+    
+    /**
+     * Rehace el último cambio deshecho
+     */
+    function redo() {
+        if (historyIndex < historyStack.length - 1) {
+            historyIndex++;
+            restoreState(historyStack[historyIndex]);
+            updateHistoryButtons();
+            showToast('Cambio rehecho', 'info');
+        }
+    }
+
+    // ==================== DEBOUNCE ====================
+    
+    /**
+     * Aplica debounce a una función
+     * @param {Function} func - Función a ejecutar
+     * @param {number} delay - Delay en ms
+     */
+    function debounce(func, delay = CONFIG.DEBOUNCE_DELAY) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(func, delay);
+    }
+    
+    /**
+     * Wrapper para applyTransformations con debounce
+     */
+    function debouncedApplyTransformations() {
+        debounce(() => {
+            applyTransformations();
+            saveState();
+        });
+    }
+
+    // ==================== EVENT LISTENERS ====================
+    
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         dropZone.classList.add('dragover');
@@ -91,50 +359,114 @@ document.addEventListener('DOMContentLoaded', function() {
 
     toleranceInput.addEventListener('input', () => {
         toleranceValue.textContent = `${toleranceInput.value}%`;
-        applyTransformations();
+        debouncedApplyTransformations();
     });
 
     bgColorInput.addEventListener('input', () => {
-        applyTransformations();
+        debouncedApplyTransformations();
     });
 
     edgesOnlyCheckbox.addEventListener('change', () => {
-        applyTransformations();
+        debouncedApplyTransformations();
     });
 
     contrastSlider.addEventListener('input', () => {
         contrastValue.textContent = `${contrastSlider.value}%`;
-        applyTransformations();
+        debouncedApplyTransformations();
+    });
+    
+    brightnessSlider.addEventListener('input', () => {
+        brightnessValue.textContent = `${brightnessSlider.value}%`;
+        debouncedApplyTransformations();
+    });
+    
+    saturationSlider.addEventListener('input', () => {
+        saturationValue.textContent = `${saturationSlider.value}%`;
+        debouncedApplyTransformations();
     });
 
     // Filter button event listeners
     filterNoneBtn.addEventListener('click', () => setActiveFilter('none'));
     filterGrayscaleBtn.addEventListener('click', () => setActiveFilter('grayscale'));
     filterSepiaBtn.addEventListener('click', () => setActiveFilter('sepia'));
+    filterInvertBtn.addEventListener('click', () => setActiveFilter('invert'));
+    
+    // Rotation controls
+    rotateLeftBtn.addEventListener('click', () => rotate(-90));
+    rotateRightBtn.addEventListener('click', () => rotate(90));
+    flipHBtn.addEventListener('click', () => flip('horizontal'));
+    flipVBtn.addEventListener('click', () => flip('vertical'));
+    
+    // History controls
+    undoBtn.addEventListener('click', undo);
+    redoBtn.addEventListener('click', redo);
+    
+    // Compare button (hold to compare)
+    compareBtn.addEventListener('mousedown', showOriginal);
+    compareBtn.addEventListener('mouseup', hideOriginal);
+    compareBtn.addEventListener('mouseleave', hideOriginal);
+    compareBtn.addEventListener('touchstart', showOriginal);
+    compareBtn.addEventListener('touchend', hideOriginal);
+    
+    // Reset button
+    resetBtn.addEventListener('click', resetAllChanges);
 
     // Handle dimension inputs
     widthInput.addEventListener('input', () => {
         updateDimensions();
-        applyTransformations();
+        debouncedApplyTransformations();
     });
     
     heightInput.addEventListener('input', () => {
         updateDimensions();
-        applyTransformations();
+        debouncedApplyTransformations();
     });
     
     keepAspect.addEventListener('change', () => {
         updateDimensions();
-        applyTransformations();
+        debouncedApplyTransformations();
     });
     
     percentInput.addEventListener('input', () => {
         updateDimensions();
-        applyTransformations();
+        debouncedApplyTransformations();
     });
 
     // Handle download button click
     downloadBtn.addEventListener('click', processAndDownload);
+    
+    // ==================== ATAJOS DE TECLADO ====================
+    
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+S - Descargar
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            if (!downloadBtn.disabled) processAndDownload();
+        }
+        // Ctrl+Z - Deshacer
+        if (e.ctrlKey && !e.shiftKey && e.key === 'z') {
+            e.preventDefault();
+            undo();
+        }
+        // Ctrl+Y o Ctrl+Shift+Z - Rehacer
+        if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'z')) {
+            e.preventDefault();
+            redo();
+        }
+        // Escape - Resetear
+        if (e.key === 'Escape' && !resetBtn.disabled) {
+            resetAllChanges();
+        }
+        // Ctrl+Arrow - Rotar
+        if (e.ctrlKey && e.key === 'ArrowLeft' && !rotateLeftBtn.disabled) {
+            e.preventDefault();
+            rotate(-90);
+        }
+        if (e.ctrlKey && e.key === 'ArrowRight' && !rotateRightBtn.disabled) {
+            e.preventDefault();
+            rotate(90);
+        }
+    });
 
     // ==================== FUNCIONES PRINCIPALES ====================
     
@@ -143,28 +475,21 @@ document.addEventListener('DOMContentLoaded', function() {
      * Valida tipo y tamaño, carga la imagen con FileReader, e inicializa Cropper.js.
      * 
      * @param {File} file - Objeto File del navegador (desde input o drag-drop)
-     * @throws {Alert} Si el archivo no es una imagen válida
-     * @throws {Alert} Si el archivo excede 10MB
      * @returns {void}
-     * 
-     * @example
-     * fileInput.addEventListener('change', (e) => {
-     *     if (e.target.files.length) {
-     *         handleFileSelect(e.target.files[0]);
-     *     }
-     * });
      */
     function handleFileSelect(file) {
         if (!file.type.match('image.*')) {
-            alert('Por favor selecciona un archivo de imagen válido');
+            showToast('Por favor selecciona un archivo de imagen válido', 'error');
             return;
         }
-        if (file.size > 10 * 1024 * 1024) { // 10MB limit
-            alert('El archivo es demasiado grande (máximo 10MB)');
+        if (file.size > CONFIG.MAX_FILE_SIZE) {
+            showToast('El archivo es demasiado grande (máximo 10MB)', 'error');
             return;
         }
 
+        setLoading(true, 'Cargando imagen...');
         currentFile = file;
+        
         const reader = new FileReader();
         reader.onload = function(e) {
             imagePreview.src = e.target.result;
@@ -184,19 +509,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (cropper) {
                     cropper.destroy();
                 }
+                
+                // Reset flip state
+                scaleX = 1;
+                scaleY = 1;
+                
                 cropper = new Cropper(imagePreview, {
                     viewMode: 1,
                     autoCropArea: 1,
                     responsive: true,
                     ready: function () {
-                        applyTransformations(); // Initial application of transformations
+                        setLoading(false);
+                        setControlsEnabled(true);
+                        updateImageInfo();
+                        applyTransformations();
+                        
+                        // Inicializar historial
+                        historyStack = [];
+                        historyIndex = -1;
+                        saveState();
+                        
+                        showToast('Imagen cargada correctamente', 'success');
                     },
                     crop: function() {
-                        applyTransformations(); // Apply transformations on crop
+                        updateImageInfo();
+                        debouncedApplyTransformations();
                     }
                 });
                 resetControls();
             };
+        };
+        reader.onerror = function() {
+            setLoading(false);
+            showToast('Error al leer el archivo', 'error');
         };
         reader.readAsDataURL(file);
     }
@@ -221,25 +566,37 @@ document.addEventListener('DOMContentLoaded', function() {
         edgesOnlyCheckbox.checked = true;
         contrastSlider.value = 100;
         contrastValue.textContent = '100%';
-        maskCanvas.style.display = 'none'; // Hide mask initially
-        setActiveFilter('none', true); // Reset to no filter and update UI
+        brightnessSlider.value = 100;
+        brightnessValue.textContent = '100%';
+        saturationSlider.value = 100;
+        saturationValue.textContent = '100%';
+        maskCanvas.style.display = 'none';
+        setActiveFilter('none', true);
+    }
+    
+    /**
+     * Resetea todos los cambios a los valores originales
+     */
+    function resetAllChanges() {
+        if (!cropper) return;
+        
+        resetControls();
+        scaleX = 1;
+        scaleY = 1;
+        cropper.reset();
+        cropper.scaleX(1);
+        cropper.scaleY(1);
+        applyTransformations();
+        saveState();
+        showToast('Cambios reseteados', 'info');
     }
 
     /**
      * Cambia el filtro activo y actualiza la UI.
-     * Actualiza los botones de filtro y aplica las transformaciones.
      * 
-     * @param {('none'|'grayscale'|'sepia')} filterName - Nombre del filtro a activar
+     * @param {('none'|'grayscale'|'sepia'|'invert')} filterName - Nombre del filtro a activar
      * @param {boolean} [isReset=false] - Si es true, no dispara applyTransformations()
      * @returns {void}
-     * 
-     * @example
-     * // Activar filtro sepia
-     * setActiveFilter('sepia');
-     * 
-     * @example
-     * // Reset sin disparar transformaciones (uso interno)
-     * setActiveFilter('none', true);
      */
     function setActiveFilter(filterName, isReset = false) {
         currentFilter = filterName;
@@ -248,8 +605,58 @@ document.addEventListener('DOMContentLoaded', function() {
         if (filterName === 'none') filterNoneBtn.classList.add('active');
         else if (filterName === 'grayscale') filterGrayscaleBtn.classList.add('active');
         else if (filterName === 'sepia') filterSepiaBtn.classList.add('active');
+        else if (filterName === 'invert') filterInvertBtn.classList.add('active');
         
         if (!isReset) {
+            applyTransformations();
+            saveState();
+        }
+    }
+    
+    /**
+     * Rota la imagen
+     * @param {number} degrees - Grados a rotar (90 o -90)
+     */
+    function rotate(degrees) {
+        if (!cropper) return;
+        cropper.rotate(degrees);
+        saveState();
+        showToast(`Rotado ${degrees > 0 ? 'derecha' : 'izquierda'}`, 'info');
+    }
+    
+    /**
+     * Voltea la imagen horizontal o verticalmente
+     * @param {'horizontal'|'vertical'} direction - Dirección del volteo
+     */
+    function flip(direction) {
+        if (!cropper) return;
+        
+        if (direction === 'horizontal') {
+            scaleX = scaleX * -1;
+            cropper.scaleX(scaleX);
+        } else {
+            scaleY = scaleY * -1;
+            cropper.scaleY(scaleY);
+        }
+        
+        saveState();
+        showToast(`Volteado ${direction === 'horizontal' ? 'horizontalmente' : 'verticalmente'}`, 'info');
+    }
+    
+    /**
+     * Muestra la imagen original (para comparación)
+     */
+    function showOriginal() {
+        if (maskCanvas) {
+            maskCanvas.style.display = 'none';
+        }
+    }
+    
+    /**
+     * Oculta la imagen original (vuelve a mostrar ediciones)
+     */
+    function hideOriginal() {
+        if (maskCanvas && cropper) {
             applyTransformations();
         }
     }
@@ -298,23 +705,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     /**
      * Aplica todas las transformaciones seleccionadas en tiempo real.
-     * Crea un canvas temporal, procesa píxeles (contraste, filtros, bg removal)
+     * Crea un canvas temporal, procesa píxeles (brillo, contraste, saturación, filtros, bg removal)
      * y renderiza el preview en maskCanvas superpuesto sobre la imagen.
      * 
      * @returns {void}
-     * 
-     * @performance Tiempo típico: 30-500ms según resolución de imagen
-     * @performance Bloquea el main thread (procesamiento síncrono)
-     * 
-     * @sideEffect Modifica el contenido y posición de maskCanvas
-     * @sideEffect Puede ocultar maskCanvas si no hay imagen válida
-     * 
-     * @algorithm
-     * 1. Obtener canvas recortado de Cropper
-     * 2. Aplicar contraste: factor * (pixel - 128) + 128
-     * 3. Aplicar filtro activo (grayscale/sepia)
-     * 4. Aplicar eliminación de fondo por similitud de color
-     * 5. Renderizar resultado en maskCanvas
      */
     function applyTransformations() {
         if (!currentFile || !cropper || !cropper.ready || !originalImage) {
@@ -342,23 +736,49 @@ document.addEventListener('DOMContentLoaded', function() {
         const imageData = workingCtx.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
         const data = imageData.data;
 
-        // 1. Apply contrast
+        // 1. Apply brightness
+        const brightnessLevel = parseFloat(brightnessSlider.value) / 100;
+        
+        // 2. Apply contrast
         const contrastLevel = parseFloat(contrastSlider.value);
-        const factor = (259 * (contrastLevel + 255)) / (255 * (259 - contrastLevel));
+        const contrastFactor = (259 * (contrastLevel + 255)) / (255 * (259 - contrastLevel));
+        
+        // 3. Apply saturation
+        const saturationLevel = parseFloat(saturationSlider.value) / 100;
 
         for (let i = 0; i < data.length; i += 4) {
-            data[i] = Math.max(0, Math.min(255, factor * (data[i] - 128) + 128));
-            data[i+1] = Math.max(0, Math.min(255, factor * (data[i+1] - 128) + 128));
-            data[i+2] = Math.max(0, Math.min(255, factor * (data[i+2] - 128) + 128));
+            let r = data[i];
+            let g = data[i+1];
+            let b = data[i+2];
+            
+            // Brightness
+            r *= brightnessLevel;
+            g *= brightnessLevel;
+            b *= brightnessLevel;
+            
+            // Contrast
+            r = contrastFactor * (r - 128) + 128;
+            g = contrastFactor * (g - 128) + 128;
+            b = contrastFactor * (b - 128) + 128;
+            
+            // Saturation
+            const gray = 0.2989 * r + 0.587 * g + 0.114 * b;
+            r = gray + saturationLevel * (r - gray);
+            g = gray + saturationLevel * (g - gray);
+            b = gray + saturationLevel * (b - gray);
+            
+            data[i] = Math.max(0, Math.min(255, r));
+            data[i+1] = Math.max(0, Math.min(255, g));
+            data[i+2] = Math.max(0, Math.min(255, b));
         }
 
-        // 2. Apply Filters
+        // 4. Apply Filters
         if (currentFilter === 'grayscale') {
             for (let i = 0; i < data.length; i += 4) {
                 const avg = (data[i] + data[i+1] + data[i+2]) / 3;
-                data[i] = avg; // red
-                data[i+1] = avg; // green
-                data[i+2] = avg; // blue
+                data[i] = avg;
+                data[i+1] = avg;
+                data[i+2] = avg;
             }
         } else if (currentFilter === 'sepia') {
             for (let i = 0; i < data.length; i += 4) {
@@ -369,22 +789,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 data[i+1] = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
                 data[i+2] = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
             }
+        } else if (currentFilter === 'invert') {
+            for (let i = 0; i < data.length; i += 4) {
+                data[i] = 255 - data[i];
+                data[i+1] = 255 - data[i+1];
+                data[i+2] = 255 - data[i+2];
+            }
         }
 
-        // 3. Apply Background Removal preview
+        // 5. Apply Background Removal preview
         const targetColor = hexToRgb(bgColorInput.value);
         const tolValue = parseInt(toleranceInput.value);
         
         if (bgColorInput.value !== '#ffffff' || tolValue > 0) {
             if (edgesOnlyCheckbox.checked) {
-                // Algoritmo mejorado: Flood Fill desde bordes
                 removeBackgroundFromEdges(imageData, targetColor, tolValue);
             } else {
-                // Algoritmo original: Comparación global de píxeles
                 for (let i = 0; i < data.length; i += 4) {
                     const pixelColor = { r: data[i], g: data[i+1], b: data[i+2] };
                     if (isColorSimilar(targetColor, pixelColor, tolValue)) {
-                        data[i+3] = 0; // Make matching pixels fully transparent
+                        data[i+3] = 0;
                     }
                 }
             }
@@ -406,7 +830,7 @@ document.addEventListener('DOMContentLoaded', function() {
         maskCanvas.style.width = cropBoxData.width + 'px';
         maskCanvas.style.height = cropBoxData.height + 'px';
         maskCanvas.style.display = 'block';
-        maskCanvas.style.zIndex = '10'; // Ensure it's above the image
+        maskCanvas.style.zIndex = '10';
         
         // Clear and draw the processed image to the mask canvas
         maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
@@ -415,167 +839,193 @@ document.addEventListener('DOMContentLoaded', function() {
 
     /**
      * Procesa la imagen final con todas las transformaciones y la descarga.
-     * Aplica redimensionado, contraste, filtros y bg removal en el canvas final,
-     * comprime con Compressor.js y descarga con FileSaver.js.
      * 
      * @returns {void}
-     * 
-     * @throws {Alert} Si no hay imagen cargada
-     * @throws {Alert} Si hay error al procesar la imagen
-     * @throws {Alert} Si Compressor.js falla
-     * 
-     * @algorithm
-     * 1. Obtener canvas recortado de Cropper
-     * 2. Redimensionar si se especificaron dimensiones
-     * 3. Aplicar contraste
-     * 4. Aplicar filtros (grayscale/sepia)
-     * 5. Aplicar eliminación de fondo (forzar PNG si hay transparencia)
-     * 6. Convertir a Blob
-     * 7. Comprimir con calidad seleccionada
-     * 8. Descargar archivo
-     * 
-     * @example
-     * // Usuario hace clic en botón de descarga
-     * downloadBtn.addEventListener('click', processAndDownload);
      */
     function processAndDownload() {
         if (!currentFile || !cropper || !cropper.ready) {
-            alert('Por favor sube una imagen primero');
+            showToast('Por favor sube una imagen primero', 'warning');
             return;
         }
 
-        let canvasToDownload = cropper.getCroppedCanvas();
-        if (!canvasToDownload) {
-            alert('Error al procesar la imagen');
-            return;
-        }
-        const ctx = canvasToDownload.getContext('2d');
+        setLoading(true, 'Procesando imagen...');
 
-        // --- Apply final transformations for download ---
-        // 1. Resize (if width/height or percent is set)
-        let finalWidth = parseFloat(widthInput.value);
-        let finalHeight = parseFloat(heightInput.value);
-        const scalePercent = parseFloat(percentInput.value) / 100;
-
-        if (percentInput.value && percentInput.value !== '100') {
-            finalWidth = canvasToDownload.width * scalePercent;
-            finalHeight = canvasToDownload.height * scalePercent;
-        } else if (finalWidth || finalHeight) {
-            if (keepAspect.checked) {
-                const currentAspectRatio = canvasToDownload.width / canvasToDownload.height;
-                if (finalWidth && !finalHeight) {
-                    finalHeight = finalWidth / currentAspectRatio;
-                } else if (finalHeight && !finalWidth) {
-                    finalWidth = finalHeight * currentAspectRatio;
+        // Usar setTimeout para permitir que el UI se actualice
+        setTimeout(() => {
+            try {
+                let canvasToDownload = cropper.getCroppedCanvas();
+                if (!canvasToDownload) {
+                    setLoading(false);
+                    showToast('Error al procesar la imagen', 'error');
+                    return;
                 }
-            }
-        } else {
-            finalWidth = canvasToDownload.width;
-            finalHeight = canvasToDownload.height;
-        }
 
-        if (finalWidth !== canvasToDownload.width || finalHeight !== canvasToDownload.height) {
-            const tempResizeCanvas = document.createElement('canvas');
-            tempResizeCanvas.width = Math.round(finalWidth);
-            tempResizeCanvas.height = Math.round(finalHeight);
-            const tempResizeCtx = tempResizeCanvas.getContext('2d');
-            tempResizeCtx.drawImage(canvasToDownload, 0, 0, tempResizeCanvas.width, tempResizeCanvas.height);
-            canvasToDownload = tempResizeCanvas;
-        }
+                // --- Apply final transformations for download ---
+                // 1. Resize (if width/height or percent is set)
+                let finalWidth = parseFloat(widthInput.value);
+                let finalHeight = parseFloat(heightInput.value);
+                const scalePercent = parseFloat(percentInput.value) / 100;
 
-        // 2. Contrast
-        const contrastLevelDownload = parseFloat(contrastSlider.value);
-        const factorDownload = (259 * (contrastLevelDownload + 255)) / (255 * (259 - contrastLevelDownload));
-        const imageData = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-        const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-            data[i] = Math.max(0, Math.min(255, factorDownload * (data[i] - 128) + 128));
-            data[i+1] = Math.max(0, Math.min(255, factorDownload * (data[i+1] - 128) + 128));
-            data[i+2] = Math.max(0, Math.min(255, factorDownload * (data[i+2] - 128) + 128));
-        }
-        ctx.putImageData(imageData, 0, 0);
+                if (percentInput.value && percentInput.value !== '100') {
+                    finalWidth = canvasToDownload.width * scalePercent;
+                    finalHeight = canvasToDownload.height * scalePercent;
+                } else if (finalWidth || finalHeight) {
+                    if (keepAspect.checked) {
+                        const currentAspectRatio = canvasToDownload.width / canvasToDownload.height;
+                        if (finalWidth && !finalHeight) {
+                            finalHeight = finalWidth / currentAspectRatio;
+                        } else if (finalHeight && !finalWidth) {
+                            finalWidth = finalHeight * currentAspectRatio;
+                        }
+                    }
+                } else {
+                    finalWidth = canvasToDownload.width;
+                    finalHeight = canvasToDownload.height;
+                }
 
-        // 3. Apply Filters (final download)
-        if (currentFilter === 'grayscale') {
-            const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-            const dataForFilter = imgDataForFilter.data;
-            for (let i = 0; i < dataForFilter.length; i += 4) {
-                const avg = (dataForFilter[i] + dataForFilter[i+1] + dataForFilter[i+2]) / 3;
-                dataForFilter[i] = avg;
-                dataForFilter[i+1] = avg;
-                dataForFilter[i+2] = avg;
-            }
-            ctx.putImageData(imgDataForFilter, 0, 0);
-        } else if (currentFilter === 'sepia') {
-            const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-            const dataForFilter = imgDataForFilter.data;
-            for (let i = 0; i < dataForFilter.length; i += 4) {
-                const r = dataForFilter[i];
-                const g = dataForFilter[i+1];
-                const b = dataForFilter[i+2];
-                dataForFilter[i] = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
-                dataForFilter[i+1] = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
-                dataForFilter[i+2] = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
-            }
-            ctx.putImageData(imgDataForFilter, 0, 0);
-        }
+                if (finalWidth !== canvasToDownload.width || finalHeight !== canvasToDownload.height) {
+                    const tempResizeCanvas = document.createElement('canvas');
+                    tempResizeCanvas.width = Math.round(finalWidth);
+                    tempResizeCanvas.height = Math.round(finalHeight);
+                    const tempResizeCtx = tempResizeCanvas.getContext('2d');
+                    tempResizeCtx.drawImage(canvasToDownload, 0, 0, tempResizeCanvas.width, tempResizeCanvas.height);
+                    canvasToDownload = tempResizeCanvas;
+                }
 
-        // 4. Background Removal (final)
-        const targetColor = hexToRgb(bgColorInput.value);
-        const tolValue = parseInt(toleranceInput.value);
-        let actualFormat = formatSelect.value;
+                const ctx = canvasToDownload.getContext('2d');
+                const imageData = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
+                const data = imageData.data;
 
-        if (bgColorInput.value !== '#ffffff' || tolValue > 0) {
-            const imgDataForBgRemoval = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-            const dataForBgRemoval = imgDataForBgRemoval.data;
-            let hasTransparentPixels = false;
-            
-            if (edgesOnlyCheckbox.checked) {
-                // Algoritmo mejorado: Flood Fill desde bordes
-                removeBackgroundFromEdges(imgDataForBgRemoval, targetColor, tolValue);
-                // Verificar si se crearon píxeles transparentes
-                for (let i = 3; i < dataForBgRemoval.length; i += 4) {
-                    if (dataForBgRemoval[i] === 0) {
-                        hasTransparentPixels = true;
-                        break;
+                // 2. Apply brightness, contrast, saturation
+                const brightnessLevel = parseFloat(brightnessSlider.value) / 100;
+                const contrastLevel = parseFloat(contrastSlider.value);
+                const contrastFactor = (259 * (contrastLevel + 255)) / (255 * (259 - contrastLevel));
+                const saturationLevel = parseFloat(saturationSlider.value) / 100;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    let r = data[i];
+                    let g = data[i+1];
+                    let b = data[i+2];
+                    
+                    // Brightness
+                    r *= brightnessLevel;
+                    g *= brightnessLevel;
+                    b *= brightnessLevel;
+                    
+                    // Contrast
+                    r = contrastFactor * (r - 128) + 128;
+                    g = contrastFactor * (g - 128) + 128;
+                    b = contrastFactor * (b - 128) + 128;
+                    
+                    // Saturation
+                    const gray = 0.2989 * r + 0.587 * g + 0.114 * b;
+                    r = gray + saturationLevel * (r - gray);
+                    g = gray + saturationLevel * (g - gray);
+                    b = gray + saturationLevel * (b - gray);
+                    
+                    data[i] = Math.max(0, Math.min(255, r));
+                    data[i+1] = Math.max(0, Math.min(255, g));
+                    data[i+2] = Math.max(0, Math.min(255, b));
+                }
+                ctx.putImageData(imageData, 0, 0);
+
+                // 3. Apply Filters (final download)
+                if (currentFilter === 'grayscale') {
+                    const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
+                    const dataForFilter = imgDataForFilter.data;
+                    for (let i = 0; i < dataForFilter.length; i += 4) {
+                        const avg = (dataForFilter[i] + dataForFilter[i+1] + dataForFilter[i+2]) / 3;
+                        dataForFilter[i] = avg;
+                        dataForFilter[i+1] = avg;
+                        dataForFilter[i+2] = avg;
+                    }
+                    ctx.putImageData(imgDataForFilter, 0, 0);
+                } else if (currentFilter === 'sepia') {
+                    const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
+                    const dataForFilter = imgDataForFilter.data;
+                    for (let i = 0; i < dataForFilter.length; i += 4) {
+                        const r = dataForFilter[i];
+                        const g = dataForFilter[i+1];
+                        const b = dataForFilter[i+2];
+                        dataForFilter[i] = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
+                        dataForFilter[i+1] = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
+                        dataForFilter[i+2] = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
+                    }
+                    ctx.putImageData(imgDataForFilter, 0, 0);
+                } else if (currentFilter === 'invert') {
+                    const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
+                    const dataForFilter = imgDataForFilter.data;
+                    for (let i = 0; i < dataForFilter.length; i += 4) {
+                        dataForFilter[i] = 255 - dataForFilter[i];
+                        dataForFilter[i+1] = 255 - dataForFilter[i+1];
+                        dataForFilter[i+2] = 255 - dataForFilter[i+2];
+                    }
+                    ctx.putImageData(imgDataForFilter, 0, 0);
+                }
+
+                // 4. Background Removal (final)
+                const targetColor = hexToRgb(bgColorInput.value);
+                const tolValue = parseInt(toleranceInput.value);
+                let actualFormat = formatSelect.value;
+
+                if (bgColorInput.value !== '#ffffff' || tolValue > 0) {
+                    const imgDataForBgRemoval = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
+                    const dataForBgRemoval = imgDataForBgRemoval.data;
+                    let hasTransparentPixels = false;
+                    
+                    if (edgesOnlyCheckbox.checked) {
+                        removeBackgroundFromEdges(imgDataForBgRemoval, targetColor, tolValue);
+                        for (let i = 3; i < dataForBgRemoval.length; i += 4) {
+                            if (dataForBgRemoval[i] === 0) {
+                                hasTransparentPixels = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        for (let i = 0; i < dataForBgRemoval.length; i += 4) {
+                            const pixelColor = { r: dataForBgRemoval[i], g: dataForBgRemoval[i+1], b: dataForBgRemoval[i+2] };
+                            if (isColorSimilar(targetColor, pixelColor, tolValue)) {
+                                dataForBgRemoval[i+3] = 0;
+                                hasTransparentPixels = true;
+                            }
+                        }
+                    }
+                    
+                    ctx.putImageData(imgDataForBgRemoval, 0, 0);
+                    if (hasTransparentPixels) {
+                        actualFormat = 'png';
                     }
                 }
-            } else {
-                // Algoritmo original: Comparación global de píxeles
-                for (let i = 0; i < dataForBgRemoval.length; i += 4) {
-                    const pixelColor = { r: dataForBgRemoval[i], g: dataForBgRemoval[i+1], b: dataForBgRemoval[i+2] };
-                    if (isColorSimilar(targetColor, pixelColor, tolValue)) {
-                        dataForBgRemoval[i+3] = 0; // Set alpha to transparent
-                        hasTransparentPixels = true;
-                    }
-                }
-            }
-            
-            ctx.putImageData(imgDataForBgRemoval, 0, 0);
-            if (hasTransparentPixels) {
-                actualFormat = 'png'; // Force PNG if transparency is added
-            }
-        }
 
-        // --- Compression and Download ---
-        const mimeType = `image/${actualFormat}`;
-        canvasToDownload.toBlob((blob) => {
-            if (!blob) {
-                alert('Error al crear el blob de la imagen.');
-                return;
+                // --- Compression and Download ---
+                const mimeType = `image/${actualFormat}`;
+                canvasToDownload.toBlob((blob) => {
+                    if (!blob) {
+                        setLoading(false);
+                        showToast('Error al crear el archivo de imagen', 'error');
+                        return;
+                    }
+                    new Compressor(blob, {
+                        quality: qualitySlider.value / 100,
+                        mimeType: mimeType,
+                        success(result) {
+                            setLoading(false);
+                            saveAs(result, `edited_image.${actualFormat}`);
+                            showToast(`Imagen descargada (${formatFileSize(result.size)})`, 'success');
+                        },
+                        error(err) {
+                            setLoading(false);
+                            console.error(err.message);
+                            showToast('Error al comprimir la imagen: ' + err.message, 'error');
+                        }
+                    });
+                }, mimeType);
+            } catch (error) {
+                setLoading(false);
+                console.error(error);
+                showToast('Error inesperado al procesar la imagen', 'error');
             }
-            new Compressor(blob, {
-                quality: qualitySlider.value / 100,
-                mimeType: mimeType,
-                success(result) {
-                    saveAs(result, `edited_image.${actualFormat}`);
-                },
-                error(err) {
-                    console.error(err.message);
-                    alert('Error al comprimir la imagen: ' + err.message);
-                }
-            });
-        }, mimeType);
+        }, 50);
     }
 
     // ==================== FUNCIONES UTILITARIAS ====================

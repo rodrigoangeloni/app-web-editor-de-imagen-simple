@@ -17,28 +17,64 @@ Un editor de imágenes potente y ligero basado en navegador que permite realizar
 
 ## ✨ Características
 
+### 📷 Carga y Recorte
 *   **Cargar Imagen:** Carga imágenes desde tu dispositivo mediante selección de archivo o arrastrando y soltando.
+*   **Información de Imagen:** Muestra dimensiones, tamaño y formato de la imagen cargada.
 *   **Recortar:** Recorta la imagen a las dimensiones deseadas usando una interfaz interactiva.
 *   **Redimensionar:**
     *   Cambia el ancho y alto de la imagen.
     *   Opción para mantener la relación de aspecto.
     *   Escala la imagen por porcentaje.
     *   Unidades en píxeles o centímetros.
-*   **Ajuste de Calidad:** Controla la calidad de la imagen para formatos con pérdida (como JPEG).
+
+### 🎨 Ajustes de Imagen
+*   **Brillo:** Ajusta el brillo de la imagen (0% - 200%).
+*   **Contraste:** Modifica el contraste de la imagen (0% - 200%).
+*   **Saturación:** Controla la intensidad de los colores (0% - 200%).
+
+### 🔄 Transformaciones
+*   **Rotación:** Rota la imagen 90° a la izquierda o derecha.
+*   **Volteo:** Voltea la imagen horizontal o verticalmente.
+
+### 🎭 Filtros de Imagen
+*   **Original:** Sin filtro aplicado.
+*   **Escala de Grises:** Convierte a blanco y negro.
+*   **Sepia:** Aplica tono sepia vintage.
+*   **Invertir:** Invierte los colores de la imagen.
+
+### ✂️ Eliminar Fondo
+*   Selecciona un color de fondo para eliminar.
+*   Ajusta la tolerancia para la eliminación del color.
+*   **Modo "Solo desde bordes"** (recomendado): Elimina solo el fondo conectado a los bordes, preservando elementos internos con colores similares.
+*   Modo global: Elimina todos los píxeles similares en toda la imagen.
+*   Previsualización en tiempo real del área a eliminar.
+
+### 💾 Exportación
+*   **Ajuste de Calidad:** Controla la calidad de la imagen para formatos con pérdida.
 *   **Selección de Formato:** Descarga la imagen en formato JPEG, PNG o WEBP.
-*   **Ajuste de Contraste:** Modifica el contraste de la imagen.
-*   **Filtros de Imagen:**
-    *   Escala de Grises
-    *   Sepia
-*   **Eliminar Fondo:**
-    *   Selecciona un color de fondo para eliminar.
-    *   Ajusta la tolerancia para la eliminación del color.
-    *   **Modo "Solo desde bordes"** (recomendado): Elimina solo el fondo conectado a los bordes, preservando elementos internos con colores similares.
-    *   Modo global: Elimina todos los píxeles similares en toda la imagen.
-    *   Previsualización en tiempo real del área a eliminar.
-*   **Optimización de Imagen:** Comprime la imagen antes de descargar para optimizar el tamaño del archivo.
-*   **Previsualización en Tiempo Real:** La mayoría de los cambios se previsualizan instantáneamente.
-*   **Descargar Imagen:** Descarga la imagen editada a tu dispositivo.
+*   **Optimización de Imagen:** Comprime la imagen antes de descargar.
+
+### ⚡ Productividad
+*   **Historial Deshacer/Rehacer:** Hasta 20 estados guardados con Ctrl+Z / Ctrl+Y.
+*   **Comparación A/B:** Mantén presionado el botón "Comparar" para ver la imagen original.
+*   **Resetear Cambios:** Vuelve al estado inicial con un clic o con Escape.
+*   **Notificaciones Toast:** Feedback visual para todas las acciones.
+*   **Indicador de Carga:** Spinner durante el procesamiento de la imagen.
+
+### ⌨️ Atajos de Teclado
+| Atajo | Acción |
+|-------|--------|
+| `Ctrl+S` | Descargar imagen |
+| `Ctrl+Z` | Deshacer |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Rehacer |
+| `Escape` | Resetear cambios |
+| `Ctrl+←` | Rotar 90° izquierda |
+| `Ctrl+→` | Rotar 90° derecha |
+
+### ♿ Accesibilidad
+*   Atributos ARIA en todos los controles interactivos.
+*   Tooltips descriptivos en todos los botones.
+*   Roles semánticos para lectores de pantalla.
 
 ## Tecnologías Utilizadas
 
@@ -469,25 +505,23 @@ Ver sección [Posibles Mejoras Futuras](#posibles-mejoras-futuras) para ideas pr
 
 ## 🚀 Posibles Mejoras Futuras
 
-### Prioridad Alta (Funcionalidad Core)
-*   **Historial Deshacer/Rehacer** - Implementar stack de estados con Ctrl+Z/Ctrl+Y
-*   **Rotación y volteo de imagen** - Integrar con API de Cropper.js
-*   **Más filtros de imagen** - Brillo, saturación, blur, sharpen, vintage
-*   **Comparación antes/después** - Toggle para ver imagen original vs. editada
-*   **Atajos de teclado** - Ctrl+S (descargar), Ctrl+O (abrir), etc.
-
-### Prioridad Media (Performance & Calidad)
+### Prioridad Alta (Performance & Calidad)
 *   **Web Workers** - Mover procesamiento pesado fuera del main thread
 *   **WebGL Filters** - Usar shaders para filtros 10-100x más rápidos
 *   **Eliminación de fondo con IA** - Usar modelos ONNX (u2net, rembg)
 *   **Modo batch/lote** - Procesar múltiples imágenes con misma configuración
 *   **Guardar/cargar presets** - Reutilizar configuraciones comunes
 
+### Prioridad Media (Nuevas Funcionalidades)
+*   **Más filtros de imagen** - Blur, sharpen, vintage, viñeta
+*   **Ajuste de curvas** - Control avanzado de tonos
+*   **Capas y máscaras** - Edición no destructiva
+*   **Texto y marcas de agua** - Overlays personalizables
+
 ### Prioridad Baja (Pulido)
 *   **Soporte para más formatos** - AVIF, HEIC (lectura)
 *   **Ajuste automático** - Auto-contrast, auto-levels
 *   **Temas claro/oscuro** - Preferencias de UI
-*   **Marcas de agua y texto** - Overlays personalizables
 *   **Exportar GIF animado** - Para comparaciones antes/después
 
 ### Consideraciones Técnicas
@@ -504,7 +538,7 @@ Este proyecto es de código abierto y está disponible bajo la licencia MIT.
 ---
 
 Creado como un proyecto de demostración.
-Última actualización: Noviembre 2025
+Última actualización: Diciembre 2025
 
 ## 📚 Documentación Completa
 
