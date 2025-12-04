@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,34 +11,37 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css">
 </head>
+
 <body>
     <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container" role="alert" aria-live="polite"></div>
-    
+
     <!-- Loading Overlay -->
-    <div id="loadingOverlay" class="loading-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="loadingText">
+    <div id="loadingOverlay" class="loading-overlay hidden" role="dialog" aria-modal="true"
+        aria-labelledby="loadingText">
         <div class="spinner" role="status" aria-hidden="true"></div>
         <p id="loadingText">Procesando...</p>
     </div>
 
     <div class="container">
         <h1>Editor de Imágenes</h1>
-        
+
         <!-- Info de imagen -->
         <div id="imageInfo" class="image-info hidden">
             <span id="infoDimensions">0 × 0 px</span>
             <span id="infoSize">0 KB</span>
             <span id="infoFormat">-</span>
         </div>
-        
-        <div class="upload-area" id="dropZone" role="button" tabindex="0" aria-label="Área para cargar imagen. Arrastra una imagen o haz clic para seleccionar">
+
+        <div class="upload-area" id="dropZone" role="button" tabindex="0"
+            aria-label="Área para cargar imagen. Arrastra una imagen o haz clic para seleccionar">
             <p>Arrastra tu imagen aquí o haz clic para seleccionar</p>
             <input type="file" id="fileInput" accept="image/*" aria-label="Seleccionar archivo de imagen">
         </div>
 
         <div class="editor-container">
             <div class="image-container" role="img" aria-label="Vista previa de la imagen">
-                <img id="imagePreview" style="max-width: 100%;" alt="Carga una imagen para editar">
+                <img id="imagePreview" style="max-width: 100%; display: none;" alt="Carga una imagen para editar">
                 <div class="mask-container">
                     <canvas id="maskPreview"></canvas>
                 </div>
@@ -81,33 +85,41 @@
                 <div class="control-group">
                     <label>Rotación:</label>
                     <div class="rotation-controls" role="group" aria-label="Controles de rotación y volteo">
-                        <button type="button" id="rotateLeft" class="icon-btn" title="Rotar 90° izquierda (Ctrl+←)" disabled aria-label="Rotar 90 grados a la izquierda">
+                        <button type="button" id="rotateLeft" class="icon-btn" title="Rotar 90° izquierda (Ctrl+←)"
+                            disabled aria-label="Rotar 90 grados a la izquierda">
                             ↶
                         </button>
-                        <button type="button" id="rotateRight" class="icon-btn" title="Rotar 90° derecha (Ctrl+→)" disabled aria-label="Rotar 90 grados a la derecha">
+                        <button type="button" id="rotateRight" class="icon-btn" title="Rotar 90° derecha (Ctrl+→)"
+                            disabled aria-label="Rotar 90 grados a la derecha">
                             ↷
                         </button>
-                        <button type="button" id="flipH" class="icon-btn" title="Voltear horizontal" disabled aria-label="Voltear horizontalmente">
+                        <button type="button" id="flipH" class="icon-btn" title="Voltear horizontal" disabled
+                            aria-label="Voltear horizontalmente">
                             ⇆
                         </button>
-                        <button type="button" id="flipV" class="icon-btn" title="Voltear vertical" disabled aria-label="Voltear verticalmente">
+                        <button type="button" id="flipV" class="icon-btn" title="Voltear vertical" disabled
+                            aria-label="Voltear verticalmente">
                             ⇅
                         </button>
                     </div>
                 </div>
                 <div class="control-group">
                     <label for="brightness">Brillo:</label>
-                    <input type="range" id="brightness" min="0" max="200" value="100" title="Ajustar brillo de la imagen" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100">
+                    <input type="range" id="brightness" min="0" max="200" value="100"
+                        title="Ajustar brillo de la imagen" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100">
                     <span id="brightnessValue">100%</span>
                 </div>
                 <div class="control-group">
                     <label for="contrast">Contraste:</label>
-                    <input type="range" id="contrast" min="0" max="200" value="100" title="Ajustar contraste de la imagen" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100">
+                    <input type="range" id="contrast" min="0" max="200" value="100"
+                        title="Ajustar contraste de la imagen" aria-valuemin="0" aria-valuemax="200"
+                        aria-valuenow="100">
                     <span id="contrastValue">100%</span>
                 </div>
                 <div class="control-group">
                     <label for="saturation">Saturación:</label>
-                    <input type="range" id="saturation" min="0" max="200" value="100" title="Ajustar saturación de colores" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100">
+                    <input type="range" id="saturation" min="0" max="200" value="100"
+                        title="Ajustar saturación de colores" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100">
                     <span id="saturationValue">100%</span>
                 </div>
                 <div class="control-group">
@@ -132,12 +144,19 @@
                 </div>
                 <div class="action-buttons" role="group" aria-label="Acciones principales">
                     <div class="history-controls" role="group" aria-label="Historial de cambios">
-                        <button type="button" id="undoBtn" class="secondary-btn" title="Deshacer (Ctrl+Z)" disabled aria-label="Deshacer último cambio">↩ Deshacer</button>
-                        <button type="button" id="redoBtn" class="secondary-btn" title="Rehacer (Ctrl+Y)" disabled aria-label="Rehacer cambio deshecho">↪ Rehacer</button>
+                        <button type="button" id="undoBtn" class="secondary-btn" title="Deshacer (Ctrl+Z)" disabled
+                            aria-label="Deshacer último cambio">↩ Deshacer</button>
+                        <button type="button" id="redoBtn" class="secondary-btn" title="Rehacer (Ctrl+Y)" disabled
+                            aria-label="Rehacer cambio deshecho">↪ Rehacer</button>
                     </div>
-                    <button type="button" id="compareBtn" class="secondary-btn" title="Mantener presionado para comparar con original" disabled aria-label="Comparar con imagen original">👁 Comparar</button>
-                    <button type="button" id="resetBtn" class="secondary-btn danger" title="Resetear todos los cambios (Escape)" disabled aria-label="Resetear todos los cambios">🔄 Resetear</button>
-                    <button type="button" id="downloadBtn" title="Descargar imagen editada (Ctrl+S)" disabled aria-label="Descargar imagen editada">⬇ Descargar Imagen</button>
+                    <button type="button" id="compareBtn" class="secondary-btn"
+                        title="Mantener presionado para comparar con original" disabled
+                        aria-label="Comparar con imagen original">👁 Comparar</button>
+                    <button type="button" id="resetBtn" class="secondary-btn danger"
+                        title="Resetear todos los cambios (Escape)" disabled aria-label="Resetear todos los cambios">🔄
+                        Resetear</button>
+                    <button type="button" id="downloadBtn" title="Descargar imagen editada (Ctrl+S)" disabled
+                        aria-label="Descargar imagen editada">⬇ Descargar Imagen</button>
                 </div>
             </div>
         </div>
@@ -148,4 +167,5 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="js/main.js"></script>
 </body>
+
 </html>

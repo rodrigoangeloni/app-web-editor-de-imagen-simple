@@ -253,6 +253,18 @@ h3 {
     z-index: 1;
 }
 
+/* Efecto visual cuando se arrastra imagen sobre el contenedor */
+.image-container.dragover {
+    border-color: var(--accent);
+    box-shadow: 0 0 30px rgba(236, 72, 153, 0.5);
+    transform: scale(1.02);
+    transition: all var(--transition-normal);
+}
+
+.image-container.dragover::before {
+    opacity: 0.5;
+}
+
 .controls {
     width: 320px;
     padding: 20px;
