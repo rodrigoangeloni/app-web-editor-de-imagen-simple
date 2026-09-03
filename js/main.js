@@ -372,8 +372,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ==================== EVENT LISTENERS ====================
 
-    // Obtener referencia al contenedor de imagen
+    // Obtener referencia al contenedor de imagen y elementos nuevos
     const imageContainer = document.querySelector('.image-container');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const emptyState = document.getElementById('emptyState');
 
     // Función reutilizable para manejar drag & drop
     function setupDragAndDrop(element) {
@@ -383,8 +385,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         element.addEventListener('dragleave', (e) => {
-            // Solo remover si realmente salimos del elemento (no de un hijo)
-            if (e.target === element) {
+            if (!element.contains(e.relatedTarget)) {
                 element.classList.remove('dragover');
             }
         });
@@ -399,11 +400,12 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Aplicar drag & drop a la zona de upload original
-    setupDragAndDrop(dropZone);
-
-    // MEJORA UX: También permitir drag & drop en el contenedor grande de imagen
     setupDragAndDrop(imageContainer);
+
+    // Upload button triggers file input
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', () => fileInput.click());
+    }
 
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length) {
@@ -411,13 +413,29 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            fileInput.click();
-        }
+    // Click on empty state also triggers file input
+    if (emptyState) {
+        emptyState.addEventListener('click', () => fileInput.click());
+    }
+
+    // Section toggle (collapsible sidebar sections)
+    document.querySelectorAll('.section-toggle').forEach(toggle => {
+        toggle.addEventListener('click', () => {
+            const expanded = toggle.getAttribute('aria-expanded') === 'true';
+            toggle.setAttribute('aria-expanded', !expanded);
+            const content = toggle.nextElementSibling;
+            if (content) {
+                content.classList.toggle('open', !expanded);
+            }
+        });
     });
+
+    // Hide empty state when image is loaded
+    function updateEmptyState(hasImage) {
+        if (emptyState) {
+            emptyState.classList.toggle('hidden', hasImage);
+        }
+    }
 
     qualitySlider.addEventListener('input', () => {
         qualityValue.textContent = `${qualitySlider.value}%`;
@@ -585,11 +603,12 @@ document.addEventListener('DOMContentLoaded', function () {
         const reader = new FileReader();
         reader.onload = function (e) {
             // Manejar error de decodificación de imagen (archivo corrupto / no decodificable)
-            imagePreview.onerror = function () {
-                setLoading(false);
-                imagePreview.style.display = 'none';
-                imagePreview.removeAttribute('src'); // vuelve al estado vacío
-                showToast('No se pudo decodificar la imagen. Archivo corrupto o formato no soportado', 'error');
+                imagePreview.onerror = function () {
+                    setLoading(false);
+                    imagePreview.style.display = 'none';
+                    imagePreview.removeAttribute('src');
+                    updateEmptyState(false);
+                    showToast('No se pudo decodificar la imagen. Archivo corrupto o formato no soportado', 'error');
                 currentFile = null;
                 fileInput.value = '';
                 imagePreview.onerror = null;
@@ -600,6 +619,7 @@ document.addEventListener('DOMContentLoaded', function () {
             imagePreview.onload = function () {
                 imagePreview.onerror = null;
                 fileInput.value = '';
+                updateEmptyState(true);
                 originalWidth = imagePreview.naturalWidth;
                 originalHeight = imagePreview.naturalHeight;
                 originalAspectRatio = originalWidth / originalHeight;
@@ -913,6 +933,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (enableBgRemoveCheckbox.checked) {
             const targetColor = hexToRgb(bgColorInput.value);
             const tolValue = parseInt(toleranceInput.value);
+            console.debug('[DBG apply] bg on, color=%s tol=%s crop=%sx%s', bgColorInput.value, toleranceInput.value, croppedCanvas.width, croppedCanvas.height);
             if (edgesOnlyCheckbox.checked) {
                 removeBackgroundFromEdges(imageData, targetColor, tolValue);
             } else {

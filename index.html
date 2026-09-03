@@ -13,155 +13,248 @@
 </head>
 
 <body>
-    <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container" role="alert" aria-live="polite"></div>
 
-    <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay hidden" role="dialog" aria-modal="true"
         aria-labelledby="loadingText">
         <div class="spinner" role="status" aria-hidden="true"></div>
         <p id="loadingText">Procesando...</p>
     </div>
 
-    <div class="container">
-        <h1>Editor de Imágenes</h1>
-
-        <!-- Info de imagen -->
-        <div id="imageInfo" class="image-info hidden">
-            <span id="infoDimensions">0 × 0 px</span>
-            <span id="infoSize">0 KB</span>
-            <span id="infoFormat">-</span>
-        </div>
-
-        <div class="upload-area" id="dropZone" role="button" tabindex="0"
-            aria-label="Área para cargar imagen. Arrastra una imagen o haz clic para seleccionar">
-            <p>Arrastra tu imagen aquí o haz clic para seleccionar</p>
-            <input type="file" id="fileInput" accept="image/*" aria-label="Seleccionar archivo de imagen">
-        </div>
-
-        <div class="editor-container">
-            <div class="image-container" role="img" aria-label="Vista previa de la imagen">
-                <img id="imagePreview" style="max-width: 100%; display: none;" alt="Carga una imagen para editar">
-                <div class="mask-container">
-                    <canvas id="maskPreview"></canvas>
+    <div class="app-layout">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>Editor de Imágenes</h1>
+            <div class="header-actions">
+                <div id="imageInfo" class="image-info hidden">
+                    <span id="infoDimensions">0 × 0 px</span>
+                    <span class="info-sep">|</span>
+                    <span id="infoSize">0 KB</span>
+                    <span class="info-sep">|</span>
+                    <span id="infoFormat">-</span>
                 </div>
+                <button type="button" id="uploadBtn" class="header-btn" title="Cargar imagen"
+                    aria-label="Cargar nueva imagen">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                    <span>Cargar</span>
+                </button>
             </div>
-            <div class="controls">
-                <div class="control-group">
-                    <label for="quality">Calidad:</label>
-                    <input type="range" id="quality" min="1" max="100" value="90" aria-valuemin="1" aria-valuemax="100" aria-valuenow="90" aria-label="Calidad de compresión">
-                    <span id="qualityValue">90%</span>
-                </div>
-                <div class="control-group">
-                    <label for="format">Formato:</label>
-                    <select id="format">
-                        <option value="jpeg">JPEG</option>
-                        <option value="png" selected>PNG</option>
-                        <option value="webp">WEBP</option>
-                    </select>
-                </div>
-                <div class="control-group">
-                    <label>Redimensionar:</label>
-                    <div class="size-controls">
-                        <div>
-                            <input type="number" id="width" placeholder="Ancho" min="1">
-                            <input type="number" id="height" placeholder="Alto" min="1">
+        </header>
+
+        <!-- Main Editor -->
+        <div class="editor-layout">
+            <!-- Canvas area -->
+            <main class="canvas-area">
+                <div class="image-container" id="dropZone" role="img" aria-label="Vista previa de la imagen">
+                    <img id="imagePreview" style="max-width: 100%; display: none;" alt="Carga una imagen para editar">
+                    <div class="mask-container">
+                        <canvas id="maskPreview"></canvas>
+                    </div>
+                    <!-- Empty state -->
+                    <div class="empty-state" id="emptyState">
+                        <div class="empty-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                         </div>
-                        <div>
-                            <select id="unit">
-                                <option value="px">Píxeles</option>
-                                <option value="cm">Centímetros</option>
-                            </select>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="keepAspect" checked> Mantener relación
+                        <p>Arrastra una imagen aquí</p>
+                        <span class="empty-hint">o haz clic en "Cargar" arriba</span>
+                        <input type="file" id="fileInput" accept="image/*" aria-label="Seleccionar archivo de imagen">
+                    </div>
+                </div>
+            </main>
+
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-scroll">
+                    <!-- Export section -->
+                    <section class="sidebar-section">
+                        <button class="section-toggle" aria-expanded="true" data-section="export">
+                            <span>Exportar</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                        <div class="section-content open">
+                            <div class="control-row">
+                                <label for="format">Formato</label>
+                                <select id="format">
+                                    <option value="jpeg">JPEG</option>
+                                    <option value="png" selected>PNG</option>
+                                    <option value="webp">WEBP</option>
+                                </select>
+                            </div>
+                            <div class="control-row">
+                                <label for="quality">Calidad</label>
+                                <div class="slider-row">
+                                    <input type="range" id="quality" min="1" max="100" value="90" aria-label="Calidad de compresión">
+                                    <span id="qualityValue" class="slider-val">90%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Resize section -->
+                    <section class="sidebar-section">
+                        <button class="section-toggle" aria-expanded="true" data-section="resize">
+                            <span>Redimensionar</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                        <div class="section-content open">
+                            <div class="control-row-inline">
+                                <div class="input-group">
+                                    <label for="width">Ancho</label>
+                                    <input type="number" id="width" placeholder="px" min="1">
+                                </div>
+                                <div class="input-group">
+                                    <label for="height">Alto</label>
+                                    <input type="number" id="height" placeholder="px" min="1">
+                                </div>
+                            </div>
+                            <div class="control-row-inline">
+                                <div class="input-group">
+                                    <label for="unit">Unidad</label>
+                                    <select id="unit">
+                                        <option value="px">Píxeles</option>
+                                        <option value="cm">Centímetros</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label for="percent">Escala</label>
+                                    <div class="percent-row">
+                                        <input type="number" id="percent" min="1" max="1000" value="100">
+                                        <span class="unit-label">%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <label class="checkbox-label compact">
+                                <input type="checkbox" id="keepAspect" checked> Mantener relación de aspecto
                             </label>
                         </div>
-                    </div>
+                    </section>
+
+                    <!-- Transform section -->
+                    <section class="sidebar-section">
+                        <button class="section-toggle" aria-expanded="true" data-section="transform">
+                            <span>Transformar</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                        <div class="section-content open">
+                            <div class="rotation-controls" role="group" aria-label="Controles de rotación y volteo">
+                                <button type="button" id="rotateLeft" class="icon-btn" title="Rotar 90° izquierda (Ctrl+←)"
+                                    disabled aria-label="Rotar 90 grados a la izquierda">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                </button>
+                                <button type="button" id="rotateRight" class="icon-btn" title="Rotar 90° derecha (Ctrl+→)"
+                                    disabled aria-label="Rotar 90 grados a la derecha">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                </button>
+                                <button type="button" id="flipH" class="icon-btn" title="Voltear horizontal" disabled
+                                    aria-label="Voltear horizontalmente">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7 5 5-5 5V7"/><path d="m21 7-5 5 5 5V7"/><path d="M12 20v2"/><path d="M12 14v2"/><path d="M12 8v2"/><path d="M12 2v2"/></svg>
+                                </button>
+                                <button type="button" id="flipV" class="icon-btn" title="Voltear vertical" disabled
+                                    aria-label="Voltear verticalmente">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 3 5 5 5-5H7"/><path d="m7 21 5-5 5 5H7"/><path d="M20 12h2"/><path d="M14 12h2"/><path d="M8 12h2"/><path d="M2 12h2"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Adjustments section -->
+                    <section class="sidebar-section">
+                        <button class="section-toggle" aria-expanded="true" data-section="adjustments">
+                            <span>Ajustes</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                        <div class="section-content open">
+                            <div class="control-row">
+                                <label for="brightness">Brillo</label>
+                                <div class="slider-row">
+                                    <input type="range" id="brightness" min="0" max="200" value="100" aria-label="Brillo">
+                                    <span id="brightnessValue" class="slider-val">100%</span>
+                                </div>
+                            </div>
+                            <div class="control-row">
+                                <label for="contrast">Contraste</label>
+                                <div class="slider-row">
+                                    <input type="range" id="contrast" min="0" max="200" value="100" aria-label="Contraste">
+                                    <span id="contrastValue" class="slider-val">100%</span>
+                                </div>
+                            </div>
+                            <div class="control-row">
+                                <label for="saturation">Saturación</label>
+                                <div class="slider-row">
+                                    <input type="range" id="saturation" min="0" max="200" value="100" aria-label="Saturación">
+                                    <span id="saturationValue" class="slider-val">100%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Filters section -->
+                    <section class="sidebar-section">
+                        <button class="section-toggle" aria-expanded="true" data-section="filters">
+                            <span>Filtros</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                        <div class="section-content open">
+                            <div class="filter-controls" role="group" aria-label="Filtros de imagen">
+                                <button id="filterNone" class="filter-btn active" aria-pressed="true">Original</button>
+                                <button id="filterGrayscale" class="filter-btn" aria-pressed="false">Grises</button>
+                                <button id="filterSepia" class="filter-btn" aria-pressed="false">Sepia</button>
+                                <button id="filterInvert" class="filter-btn" aria-pressed="false">Invertir</button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Background section -->
+                    <section class="sidebar-section">
+                        <button class="section-toggle" aria-expanded="false" data-section="background">
+                            <span>Eliminar fondo</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                        <div class="section-content">
+                            <label class="checkbox-label compact">
+                                <input type="checkbox" id="enableBgRemove"> Activar eliminación de fondo
+                            </label>
+                            <div class="bg-remove-controls">
+                                <input type="color" id="bgColor" value="#ffffff" disabled aria-label="Color de fondo a eliminar">
+                                <div class="slider-row" style="flex:1">
+                                    <input type="range" id="tolerance" min="0" max="100" value="10" disabled aria-label="Tolerancia">
+                                    <span id="toleranceValue" class="slider-val">10%</span>
+                                </div>
+                            </div>
+                            <label class="checkbox-label compact">
+                                <input type="checkbox" id="edgesOnly" checked disabled> Solo bordes (más preciso)
+                            </label>
+                        </div>
+                    </section>
                 </div>
-                <div class="control-group percent-control">
-                    <label for="percent">Escala (%):</label>
-                    <input type="number" id="percent" min="1" max="1000" value="100" style="width: 100px">
-                </div>
-                <div class="control-group">
-                    <label>Rotación:</label>
-                    <div class="rotation-controls" role="group" aria-label="Controles de rotación y volteo">
-                        <button type="button" id="rotateLeft" class="icon-btn" title="Rotar 90° izquierda (Ctrl+←)"
-                            disabled aria-label="Rotar 90 grados a la izquierda">
+
+                <!-- Action bar (fixed at bottom of sidebar) -->
+                <div class="action-bar">
+                    <div class="action-row">
+                        <button type="button" id="undoBtn" class="action-icon" title="Deshacer (Ctrl+Z)" disabled
+                            aria-label="Deshacer">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                        </button>
+                        <button type="button" id="redoBtn" class="action-icon" title="Rehacer (Ctrl+Y)" disabled
+                            aria-label="Rehacer">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/></svg>
+                        </button>
+                        <button type="button" id="compareBtn" class="action-icon" title="Comparar con original" disabled
+                            aria-label="Comparar">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                        <button type="button" id="resetBtn" class="action-icon danger" title="Resetear (Escape)" disabled
+                            aria-label="Resetear">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                         </button>
-                        <button type="button" id="rotateRight" class="icon-btn" title="Rotar 90° derecha (Ctrl+→)"
-                            disabled aria-label="Rotar 90 grados a la derecha">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-                        </button>
-                        <button type="button" id="flipH" class="icon-btn" title="Voltear horizontal" disabled
-                            aria-label="Voltear horizontalmente">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7 5 5-5 5V7"/><path d="m21 7-5 5 5 5V7"/><path d="M12 20v2"/><path d="M12 14v2"/><path d="M12 8v2"/><path d="M12 2v2"/></svg>
-                        </button>
-                        <button type="button" id="flipV" class="icon-btn" title="Voltear vertical" disabled
-                            aria-label="Voltear verticalmente">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 3 5 5 5-5H7"/><path d="m7 21 5-5 5 5H7"/><path d="M20 12h2"/><path d="M14 12h2"/><path d="M8 12h2"/><path d="M2 12h2"/></svg>
-                        </button>
                     </div>
+                    <button type="button" id="downloadBtn" disabled aria-label="Descargar imagen editada"
+                        title="Descargar (Ctrl+S)">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                        Descargar
+                    </button>
                 </div>
-                <div class="control-group">
-                    <label for="brightness">Brillo:</label>
-                    <input type="range" id="brightness" min="0" max="200" value="100"
-                        title="Ajustar brillo de la imagen" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100">
-                    <span id="brightnessValue">100%</span>
-                </div>
-                <div class="control-group">
-                    <label for="contrast">Contraste:</label>
-                    <input type="range" id="contrast" min="0" max="200" value="100"
-                        title="Ajustar contraste de la imagen" aria-valuemin="0" aria-valuemax="200"
-                        aria-valuenow="100">
-                    <span id="contrastValue">100%</span>
-                </div>
-                <div class="control-group">
-                    <label for="saturation">Saturación:</label>
-                    <input type="range" id="saturation" min="0" max="200" value="100"
-                        title="Ajustar saturación de colores" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100">
-                    <span id="saturationValue">100%</span>
-                </div>
-                <div class="control-group">
-                    <label>Filtros:</label>
-                    <div class="filter-controls" role="group" aria-label="Filtros de imagen">
-                        <button id="filterNone" class="filter-btn active" aria-pressed="true">Original</button>
-                        <button id="filterGrayscale" class="filter-btn" aria-pressed="false">Escala de Grises</button>
-                        <button id="filterSepia" class="filter-btn" aria-pressed="false">Sepia</button>
-                        <button id="filterInvert" class="filter-btn" aria-pressed="false">Invertir</button>
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label>Eliminar fondo:</label>
-                    <label class="checkbox-label" style="margin-bottom:8px;">
-                        <input type="checkbox" id="enableBgRemove"> Activar eliminación de fondo
-                    </label>
-                    <div class="bg-remove-controls">
-                        <input type="color" id="bgColor" value="#ffffff" disabled aria-label="Color de fondo a eliminar">
-                        <input type="range" id="tolerance" min="0" max="100" value="10" disabled aria-valuemin="0" aria-valuemax="100" aria-valuenow="10" aria-label="Tolerancia de eliminación de fondo">
-                        <span id="toleranceValue">10%</span>
-                    </div>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="edgesOnly" checked disabled> Solo desde bordes (más preciso)
-                    </label>
-                </div>
-                <div class="action-buttons" role="group" aria-label="Acciones principales">
-                    <div class="history-controls" role="group" aria-label="Historial de cambios">
-                        <button type="button" id="undoBtn" class="secondary-btn" title="Deshacer (Ctrl+Z)" disabled
-                            aria-label="Deshacer último cambio">↩ Deshacer</button>
-                        <button type="button" id="redoBtn" class="secondary-btn" title="Rehacer (Ctrl+Y)" disabled
-                            aria-label="Rehacer cambio deshecho">↪ Rehacer</button>
-                    </div>
-                    <button type="button" id="compareBtn" class="secondary-btn"
-                        title="Mantener presionado para comparar con original" disabled
-                        aria-label="Comparar con imagen original"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></svg> Comparar</button>
-                    <button type="button" id="resetBtn" class="secondary-btn danger"
-                        title="Resetear todos los cambios (Escape)" disabled aria-label="Resetear todos los cambios"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-                        Resetear</button>
-                    <button type="button" id="downloadBtn" title="Descargar imagen editada (Ctrl+S)" disabled
-                        aria-label="Descargar imagen editada"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> Descargar Imagen</button>
-                </div>
-            </div>
+            </aside>
         </div>
     </div>
 

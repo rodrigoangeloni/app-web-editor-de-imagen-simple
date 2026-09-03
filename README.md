@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="favicon.ico" alt="Editor de Imágenes" width="64" />
+<img src="assets/img/logo.webp" alt="Editor de Imágenes" width="64" />
 
 # Editor de Imágenes Web
 
@@ -11,7 +11,7 @@
 
 [Características](#características) • [Inicio rápido](#inicio-rápido) • [Uso](#uso) • [Cómo funciona](#cómo-funciona) • [Atajos](#atajos-de-teclado) • [Problemas comunes](#problemas-comunes)
 
-![Captura del editor con una imagen cargada](docs/images/editor.png)
+![Captura del editor con una imagen cargada](assets/img/editor.png)
 
 </div>
 
@@ -23,8 +23,8 @@ Editor de imágenes completo que corre **100% en el navegador**: sin backend, si
 ## Características
 
 **Carga y recorte**
-- Carga por clic o arrastrar y soltar, con validación de tipo y tamaño (máx. 10 MB).
-- Recorte interactivo con Cropper.js y panel informativo (dimensiones, peso, formato).
+- Carga por clic en "Cargar", arrastrar y soltar sobre el canvas, o clic en el estado vacío. Validación de tipo y tamaño (máx. 10 MB).
+- Recorte interactivo con Cropper.js y panel informativo en el header (dimensiones, peso, formato).
 
 **Ajustes y filtros**
 - Brillo, contraste y saturación (0–200 %) con previsualización en tiempo real.
@@ -42,6 +42,7 @@ Editor de imágenes completo que corre **100% en el navegador**: sin backend, si
 **Productividad y accesibilidad**
 - Deshacer/rehacer (20 estados), comparación A/B manteniendo pulsado, y reseteo total.
 - Notificaciones toast, indicador de carga, atajos de teclado y controles ARIA.
+- Sidebar con secciones colapsables para organizar las herramientas.
 - Respeta `prefers-reduced-motion`, objetivos táctiles ≥ 44 px y diseño responsive.
 
 ## Inicio rápido
@@ -58,9 +59,30 @@ Abre `http://localhost:8000` y arrastra una imagen al área de carga.
 
 ## Uso
 
-1. **Carga** una imagen con clic o drag & drop.
+1. **Carga** una imagen con el botón "Cargar" en el header, arrastrando sobre el canvas, o haciendo clic en el área vacía.
 2. **Edita** con el panel lateral: ajusta el recorte arrastrando el cuadro, mueve los sliders, aplica un filtro o activa la eliminación de fondo.
 3. **Descarga** con el botón verde (o `Ctrl+S`) en el formato y calidad elegidos.
+
+### Layout de la interfaz
+
+```
+┌─────────────────────────────────────────────┬──────────────┐
+│  Editor de Imágenes   [info]   [Cargar]     │              │
+├─────────────────────────────────────────────┤   SIDEBAR    │
+│                                             │              │
+│              CANVAS / IMAGEN                │  Exportar    │
+│           (área de recorte)                 │  Redimens.   │
+│                                             │  Transformar │
+│                                             │  Ajustes     │
+│                                             │  Filtros     │
+│                                             │  Fondo       │
+├─────────────────────────────────────────────┼──────────────┤
+│                                             │ [↺][↪][👁][⚡]│
+│                                             │ [Descargar]  │
+└─────────────────────────────────────────────┴──────────────┘
+```
+
+El sidebar es scrolleable y sus secciones son colapsables para ahorrar espacio.
 
 ## Cómo funciona
 
@@ -100,10 +122,10 @@ archivo → handleFileSelect() → Cropper.js sobre #imagePreview
 
 ```
 .
-├── index.html   # Único punto de entrada: DOM + carga de CDN y js/main.js
-├── js/main.js   # Toda la lógica (dentro de un closure DOMContentLoaded)
-├── css/style.css# Tema oscuro con variables :root, por secciones
-└── docs/images/ # Capturas para este README
+├── index.html      # Único punto de entrada: DOM + carga de CDN y js/main.js
+├── js/main.js      # Toda la lógica (dentro de un closure DOMContentLoaded)
+├── css/style.css   # Tema oscuro con variables :root, por secciones
+└── assets/img/     # Capturas para este README
 ```
 
 Los agentes de IA tienen guía propia en `AGENTS.md`.
