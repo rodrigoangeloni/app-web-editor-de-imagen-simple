@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const CONFIG = {
         MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
+        MAX_DIMENSION: 8000, // px
+        MAX_PIXELS: 25_000_000, // ~25MP, evita OOM en getImageData
         DEBOUNCE_DELAY: 100, // ms
         HISTORY_LIMIT: 20,
         TOAST_DURATION: 3000 // ms
@@ -32,6 +34,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const unitSelect = document.getElementById('unit');
     const keepAspect = document.getElementById('keepAspect');
     const percentInput = document.getElementById('percent');
+    const enableBgRemoveCheckbox = document.getElementById('enableBgRemove');
     const bgColorInput = document.getElementById('bgColor');
     const toleranceInput = document.getElementById('tolerance');
     const toleranceValue = document.getElementById('toleranceValue');
@@ -167,6 +170,32 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     /**
+     * Calcula factor de contraste desde slider 0-200 (100=neutral).
+     * Mapea 0-200 -> -255..255 para fórmula clásica de contraste.
+     * @param {number} sliderValue - Valor del slider 0-200
+     * @returns {number} Factor de contraste (0..~4)
+     */
+    function getContrastFactor(sliderValue) {
+        const mapped = (sliderValue - 100) * 2.55;
+        // Evitar división por cero cuando mapped -> 259 (no ocurre con 200->255)
+        return (259 * (mapped + 255)) / (255 * (259 - mapped));
+    }
+
+    function clampDimension(v) {
+        let n = parseInt(v, 10);
+        if (isNaN(n)) return null;
+        return Math.max(1, Math.min(CONFIG.MAX_DIMENSION, n));
+    }
+
+    function checkPixelLimit(width, height) {
+        if (width * height > CONFIG.MAX_PIXELS) {
+            showToast(`Imagen muy grande (${width}×${height}). Puede causar lentitud o fallos. Considera reducir dimensiones.`, 'warning');
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Habilita/deshabilita los controles que requieren imagen
      * @param {boolean} enabled - Estado de habilitación
      */
@@ -202,6 +231,7 @@ document.addEventListener('DOMContentLoaded', function () {
             contrast: contrastSlider.value,
             brightness: brightnessSlider.value,
             saturation: saturationSlider.value,
+            bgEnabled: enableBgRemoveCheckbox.checked,
             bgColor: bgColorInput.value,
             tolerance: toleranceInput.value,
             edgesOnly: edgesOnlyCheckbox.checked,
@@ -216,6 +246,15 @@ document.addEventListener('DOMContentLoaded', function () {
             keepAspect: keepAspect.checked
         };
 
+        // Evitar duplicados: los eventos 'crop' de Cropper pueden disparar
+        // un saveState diferido (debounce) con el estado ya guardado,
+        // lo que truncaba la rama de redo tras undo/reset/rotate.
+        const current = historyStack[historyIndex];
+        if (current && JSON.stringify(current) === JSON.stringify(state)) {
+            updateHistoryButtons();
+            return;
+        }
+
         // Eliminar estados futuros si estamos en medio del historial
         if (historyIndex < historyStack.length - 1) {
             historyStack = historyStack.slice(0, historyIndex + 1);
@@ -226,9 +265,8 @@ document.addEventListener('DOMContentLoaded', function () {
         // Limitar tamaño del historial
         if (historyStack.length > CONFIG.HISTORY_LIMIT) {
             historyStack.shift();
-        } else {
-            historyIndex++;
         }
+        historyIndex = historyStack.length - 1;
 
         updateHistoryButtons();
     }
@@ -243,18 +281,25 @@ document.addEventListener('DOMContentLoaded', function () {
         currentFilter = state.filter;
         contrastSlider.value = state.contrast;
         contrastValue.textContent = `${state.contrast}%`;
+        contrastSlider.setAttribute('aria-valuenow', state.contrast);
         brightnessSlider.value = state.brightness;
         brightnessValue.textContent = `${state.brightness}%`;
+        brightnessSlider.setAttribute('aria-valuenow', state.brightness);
         saturationSlider.value = state.saturation;
         saturationValue.textContent = `${state.saturation}%`;
+        saturationSlider.setAttribute('aria-valuenow', state.saturation);
+        enableBgRemoveCheckbox.checked = state.bgEnabled ?? false;
         bgColorInput.value = state.bgColor;
         toleranceInput.value = state.tolerance;
         toleranceValue.textContent = `${state.tolerance}%`;
+        toleranceInput.setAttribute('aria-valuenow', state.tolerance);
         edgesOnlyCheckbox.checked = state.edgesOnly;
+        updateBgRemoveEnabledState();
         scaleX = state.scaleX;
         scaleY = state.scaleY;
         qualitySlider.value = state.quality;
         qualityValue.textContent = `${state.quality}%`;
+        qualitySlider.setAttribute('aria-valuenow', state.quality);
         formatSelect.value = state.format;
         widthInput.value = state.width;
         heightInput.value = state.height;
@@ -367,13 +412,21 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fileInput.click();
+        }
+    });
 
     qualitySlider.addEventListener('input', () => {
         qualityValue.textContent = `${qualitySlider.value}%`;
+        qualitySlider.setAttribute('aria-valuenow', qualitySlider.value);
     });
 
     toleranceInput.addEventListener('input', () => {
         toleranceValue.textContent = `${toleranceInput.value}%`;
+        toleranceInput.setAttribute('aria-valuenow', toleranceInput.value);
         debouncedApplyTransformations();
     });
 
@@ -385,18 +438,33 @@ document.addEventListener('DOMContentLoaded', function () {
         debouncedApplyTransformations();
     });
 
+    function updateBgRemoveEnabledState() {
+        const enabled = enableBgRemoveCheckbox.checked;
+        bgColorInput.disabled = !enabled;
+        toleranceInput.disabled = !enabled;
+        edgesOnlyCheckbox.disabled = !enabled;
+    }
+
+    enableBgRemoveCheckbox.addEventListener('change', () => {
+        updateBgRemoveEnabledState();
+        debouncedApplyTransformations();
+    });
+
     contrastSlider.addEventListener('input', () => {
         contrastValue.textContent = `${contrastSlider.value}%`;
+        contrastSlider.setAttribute('aria-valuenow', contrastSlider.value);
         debouncedApplyTransformations();
     });
 
     brightnessSlider.addEventListener('input', () => {
         brightnessValue.textContent = `${brightnessSlider.value}%`;
+        brightnessSlider.setAttribute('aria-valuenow', brightnessSlider.value);
         debouncedApplyTransformations();
     });
 
     saturationSlider.addEventListener('input', () => {
         saturationValue.textContent = `${saturationSlider.value}%`;
+        saturationSlider.setAttribute('aria-valuenow', saturationSlider.value);
         debouncedApplyTransformations();
     });
 
@@ -493,12 +561,21 @@ document.addEventListener('DOMContentLoaded', function () {
      * @returns {void}
      */
     function handleFileSelect(file) {
-        if (!file.type.match('image.*')) {
-            showToast('Por favor selecciona un archivo de imagen válido', 'error');
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/svg+xml'];
+        if (!file.type || (!file.type.match('image.*') && !allowedTypes.includes(file.type))) {
+            showToast('Por favor selecciona un archivo de imagen válido (JPEG, PNG, WEBP, GIF)', 'error');
+            fileInput.value = '';
+            return;
+        }
+        // Defensa extra: extensiones spoofeadas (MIME puede falsificarse)
+        if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/')) {
+            showToast('Formato de imagen no soportado', 'error');
+            fileInput.value = '';
             return;
         }
         if (file.size > CONFIG.MAX_FILE_SIZE) {
             showToast('El archivo es demasiado grande (máximo 10MB)', 'error');
+            fileInput.value = '';
             return;
         }
 
@@ -507,12 +584,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const reader = new FileReader();
         reader.onload = function (e) {
+            // Manejar error de decodificación de imagen (archivo corrupto / no decodificable)
+            imagePreview.onerror = function () {
+                setLoading(false);
+                imagePreview.style.display = 'none';
+                imagePreview.removeAttribute('src'); // vuelve al estado vacío
+                showToast('No se pudo decodificar la imagen. Archivo corrupto o formato no soportado', 'error');
+                currentFile = null;
+                fileInput.value = '';
+                imagePreview.onerror = null;
+                imagePreview.onload = null;
+            };
             imagePreview.src = e.target.result;
             imagePreview.style.display = 'block'; // Mostrar imagen cuando se carga
             imagePreview.onload = function () {
+                imagePreview.onerror = null;
+                fileInput.value = '';
                 originalWidth = imagePreview.naturalWidth;
                 originalHeight = imagePreview.naturalHeight;
                 originalAspectRatio = originalWidth / originalHeight;
+                checkPixelLimit(originalWidth, originalHeight);
 
                 // Store original image data for filter reset/reapplication
                 const tempCanvas = document.createElement('canvas');
@@ -558,8 +649,14 @@ document.addEventListener('DOMContentLoaded', function () {
         reader.onerror = function () {
             setLoading(false);
             showToast('Error al leer el archivo', 'error');
+            fileInput.value = '';
+            currentFile = null;
         };
         reader.readAsDataURL(file);
+        // Permitir recargar el mismo archivo consecutivamente
+        // (el valor real se limpia definitivamente en onload/onerror)
+        // setTimeout para no interferir con FileReader en algunos navegadores
+        setTimeout(() => { if (fileInput) fileInput.value = ''; }, 0);
     }
 
     /**
@@ -571,21 +668,28 @@ document.addEventListener('DOMContentLoaded', function () {
     function resetControls() {
         qualitySlider.value = 90;
         qualityValue.textContent = '90%';
+        qualitySlider.setAttribute('aria-valuenow', '90');
         formatSelect.value = 'png';
         widthInput.value = '';
         heightInput.value = '';
         percentInput.value = '100';
         keepAspect.checked = true;
+        enableBgRemoveCheckbox.checked = false;
         bgColorInput.value = '#ffffff';
         toleranceInput.value = 10;
         toleranceValue.textContent = '10%';
+        toleranceInput.setAttribute('aria-valuenow', '10');
         edgesOnlyCheckbox.checked = true;
+        updateBgRemoveEnabledState();
         contrastSlider.value = 100;
         contrastValue.textContent = '100%';
+        contrastSlider.setAttribute('aria-valuenow', '100');
         brightnessSlider.value = 100;
         brightnessValue.textContent = '100%';
+        brightnessSlider.setAttribute('aria-valuenow', '100');
         saturationSlider.value = 100;
         saturationValue.textContent = '100%';
+        saturationSlider.setAttribute('aria-valuenow', '100');
         maskCanvas.style.display = 'none';
         setActiveFilter('none', true);
     }
@@ -684,7 +788,6 @@ document.addEventListener('DOMContentLoaded', function () {
      * @returns {void}
      * 
      * @sideEffect Actualiza valores de widthInput y heightInput si es necesario
-     * @sideEffect Dispara applyTransformations()
      */
     function updateDimensions() {
         if (!cropper || !cropper.ready || !originalImage) return;
@@ -714,9 +817,7 @@ document.addEventListener('DOMContentLoaded', function () {
             newWidth = cropBoxData.width;
             newHeight = cropBoxData.height;
         }
-        // Cropper's setCanvasData or setData might be more appropriate here if we want to resize the cropper's canvas
-        // For now, we'll let the download function handle final dimensions.
-        applyTransformations(); // Re-apply transformations as dimensions affect them
+        // Nota: no llamar a applyTransformations aquí; el caller usa debouncedApplyTransformations
     }
 
     /**
@@ -755,13 +856,14 @@ document.addEventListener('DOMContentLoaded', function () {
         // 1. Apply brightness
         const brightnessLevel = parseFloat(brightnessSlider.value) / 100;
 
-        // 2. Apply contrast
-        const contrastLevel = parseFloat(contrastSlider.value);
-        const contrastFactor = (259 * (contrastLevel + 255)) / (255 * (259 - contrastLevel));
+        // 2. Apply contrast (mapeado 0-200 -> factor neutral en 100)
+        const contrastFactor = getContrastFactor(parseFloat(contrastSlider.value));
 
         // 3. Apply saturation
         const saturationLevel = parseFloat(saturationSlider.value) / 100;
 
+        // Ajustes + filtros en una sola pasada (perf: evita 2 loops)
+        const filter = currentFilter;
         for (let i = 0; i < data.length; i += 4) {
             let r = data[i];
             let g = data[i + 1];
@@ -783,41 +885,34 @@ document.addEventListener('DOMContentLoaded', function () {
             g = gray + saturationLevel * (g - gray);
             b = gray + saturationLevel * (b - gray);
 
-            data[i] = Math.max(0, Math.min(255, r));
-            data[i + 1] = Math.max(0, Math.min(255, g));
-            data[i + 2] = Math.max(0, Math.min(255, b));
+            r = Math.max(0, Math.min(255, r));
+            g = Math.max(0, Math.min(255, g));
+            b = Math.max(0, Math.min(255, b));
+
+            // Filtros (sobre valores ya ajustados)
+            if (filter === 'grayscale') {
+                const avg = (r + g + b) / 3;
+                r = g = b = avg;
+            } else if (filter === 'sepia') {
+                const nr = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
+                const ng = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
+                const nb = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
+                r = nr; g = ng; b = nb;
+            } else if (filter === 'invert') {
+                r = 255 - r;
+                g = 255 - g;
+                b = 255 - b;
+            }
+
+            data[i] = r;
+            data[i + 1] = g;
+            data[i + 2] = b;
         }
 
-        // 4. Apply Filters
-        if (currentFilter === 'grayscale') {
-            for (let i = 0; i < data.length; i += 4) {
-                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                data[i] = avg;
-                data[i + 1] = avg;
-                data[i + 2] = avg;
-            }
-        } else if (currentFilter === 'sepia') {
-            for (let i = 0; i < data.length; i += 4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-                data[i] = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
-                data[i + 1] = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
-                data[i + 2] = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
-            }
-        } else if (currentFilter === 'invert') {
-            for (let i = 0; i < data.length; i += 4) {
-                data[i] = 255 - data[i];
-                data[i + 1] = 255 - data[i + 1];
-                data[i + 2] = 255 - data[i + 2];
-            }
-        }
-
-        // 5. Apply Background Removal preview
-        const targetColor = hexToRgb(bgColorInput.value);
-        const tolValue = parseInt(toleranceInput.value);
-
-        if (bgColorInput.value !== '#ffffff' || tolValue > 0) {
+        // 5. Apply Background Removal preview (only if enabled)
+        if (enableBgRemoveCheckbox.checked) {
+            const targetColor = hexToRgb(bgColorInput.value);
+            const tolValue = parseInt(toleranceInput.value);
             if (edgesOnlyCheckbox.checked) {
                 removeBackgroundFromEdges(imageData, targetColor, tolValue);
             } else {
@@ -878,8 +973,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 // --- Apply final transformations for download ---
                 // 1. Resize (if width/height or percent is set)
-                let finalWidth = parseFloat(widthInput.value);
-                let finalHeight = parseFloat(heightInput.value);
+                let finalWidth = clampDimension(widthInput.value);
+                let finalHeight = clampDimension(heightInput.value);
                 const scalePercent = parseFloat(percentInput.value) / 100;
 
                 if (percentInput.value && percentInput.value !== '100') {
@@ -900,6 +995,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 if (finalWidth !== canvasToDownload.width || finalHeight !== canvasToDownload.height) {
+                    finalWidth = Math.max(1, Math.min(CONFIG.MAX_DIMENSION, Math.round(finalWidth)));
+                    finalHeight = Math.max(1, Math.min(CONFIG.MAX_DIMENSION, Math.round(finalHeight)));
+                    checkPixelLimit(finalWidth, finalHeight);
                     const tempResizeCanvas = document.createElement('canvas');
                     tempResizeCanvas.width = Math.round(finalWidth);
                     tempResizeCanvas.height = Math.round(finalHeight);
@@ -912,11 +1010,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 const imageData = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
                 const data = imageData.data;
 
-                // 2. Apply brightness, contrast, saturation
+                // 2. Apply brightness, contrast, saturation + filters en una sola pasada
                 const brightnessLevel = parseFloat(brightnessSlider.value) / 100;
-                const contrastLevel = parseFloat(contrastSlider.value);
-                const contrastFactor = (259 * (contrastLevel + 255)) / (255 * (259 - contrastLevel));
+                const contrastFactor = getContrastFactor(parseFloat(contrastSlider.value));
                 const saturationLevel = parseFloat(saturationSlider.value) / 100;
+                const filter = currentFilter;
 
                 for (let i = 0; i < data.length; i += 4) {
                     let r = data[i];
@@ -939,79 +1037,55 @@ document.addEventListener('DOMContentLoaded', function () {
                     g = gray + saturationLevel * (g - gray);
                     b = gray + saturationLevel * (b - gray);
 
-                    data[i] = Math.max(0, Math.min(255, r));
-                    data[i + 1] = Math.max(0, Math.min(255, g));
-                    data[i + 2] = Math.max(0, Math.min(255, b));
-                }
-                ctx.putImageData(imageData, 0, 0);
+                    r = Math.max(0, Math.min(255, r));
+                    g = Math.max(0, Math.min(255, g));
+                    b = Math.max(0, Math.min(255, b));
 
-                // 3. Apply Filters (final download)
-                if (currentFilter === 'grayscale') {
-                    const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-                    const dataForFilter = imgDataForFilter.data;
-                    for (let i = 0; i < dataForFilter.length; i += 4) {
-                        const avg = (dataForFilter[i] + dataForFilter[i + 1] + dataForFilter[i + 2]) / 3;
-                        dataForFilter[i] = avg;
-                        dataForFilter[i + 1] = avg;
-                        dataForFilter[i + 2] = avg;
+                    // Filtros
+                    if (filter === 'grayscale') {
+                        const avg = (r + g + b) / 3;
+                        r = g = b = avg;
+                    } else if (filter === 'sepia') {
+                        const nr = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
+                        const ng = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
+                        const nb = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
+                        r = nr; g = ng; b = nb;
+                    } else if (filter === 'invert') {
+                        r = 255 - r;
+                        g = 255 - g;
+                        b = 255 - b;
                     }
-                    ctx.putImageData(imgDataForFilter, 0, 0);
-                } else if (currentFilter === 'sepia') {
-                    const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-                    const dataForFilter = imgDataForFilter.data;
-                    for (let i = 0; i < dataForFilter.length; i += 4) {
-                        const r = dataForFilter[i];
-                        const g = dataForFilter[i + 1];
-                        const b = dataForFilter[i + 2];
-                        dataForFilter[i] = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
-                        dataForFilter[i + 1] = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
-                        dataForFilter[i + 2] = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
-                    }
-                    ctx.putImageData(imgDataForFilter, 0, 0);
-                } else if (currentFilter === 'invert') {
-                    const imgDataForFilter = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-                    const dataForFilter = imgDataForFilter.data;
-                    for (let i = 0; i < dataForFilter.length; i += 4) {
-                        dataForFilter[i] = 255 - dataForFilter[i];
-                        dataForFilter[i + 1] = 255 - dataForFilter[i + 1];
-                        dataForFilter[i + 2] = 255 - dataForFilter[i + 2];
-                    }
-                    ctx.putImageData(imgDataForFilter, 0, 0);
+
+                    data[i] = r;
+                    data[i + 1] = g;
+                    data[i + 2] = b;
                 }
 
-                // 4. Background Removal (final)
-                const targetColor = hexToRgb(bgColorInput.value);
-                const tolValue = parseInt(toleranceInput.value);
+                // 3. Background Removal (final) — only if enabled, sobre el mismo ImageData
                 let actualFormat = formatSelect.value;
+                let hasTransparentPixels = false;
 
-                if (bgColorInput.value !== '#ffffff' || tolValue > 0) {
-                    const imgDataForBgRemoval = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-                    const dataForBgRemoval = imgDataForBgRemoval.data;
-                    let hasTransparentPixels = false;
+                if (enableBgRemoveCheckbox.checked) {
+                    const targetColor = hexToRgb(bgColorInput.value);
+                    const tolValue = parseInt(toleranceInput.value);
 
                     if (edgesOnlyCheckbox.checked) {
-                        removeBackgroundFromEdges(imgDataForBgRemoval, targetColor, tolValue);
-                        for (let i = 3; i < dataForBgRemoval.length; i += 4) {
-                            if (dataForBgRemoval[i] === 0) {
-                                hasTransparentPixels = true;
-                                break;
-                            }
+                        removeBackgroundFromEdges(imageData, targetColor, tolValue);
+                        for (let i = 3; i < data.length; i += 4) {
+                            if (data[i] === 0) { hasTransparentPixels = true; break; }
                         }
                     } else {
-                        for (let i = 0; i < dataForBgRemoval.length; i += 4) {
-                            const pixelColor = { r: dataForBgRemoval[i], g: dataForBgRemoval[i + 1], b: dataForBgRemoval[i + 2] };
+                        for (let i = 0; i < data.length; i += 4) {
+                            const pixelColor = { r: data[i], g: data[i + 1], b: data[i + 2] };
                             if (isColorSimilar(targetColor, pixelColor, tolValue)) {
-                                dataForBgRemoval[i + 3] = 0;
+                                data[i + 3] = 0;
                                 hasTransparentPixels = true;
                             }
                         }
                     }
-
-                    ctx.putImageData(imgDataForBgRemoval, 0, 0);
-                    if (hasTransparentPixels) {
-                        actualFormat = 'png';
-                    }
+                    if (hasTransparentPixels) actualFormat = 'png';
                 }
+                ctx.putImageData(imageData, 0, 0);
 
                 // --- Compression and Download ---
                 const mimeType = `image/${actualFormat}`;
@@ -1026,7 +1100,14 @@ document.addEventListener('DOMContentLoaded', function () {
                         mimeType: mimeType,
                         success(result) {
                             setLoading(false);
-                            saveAs(result, `edited_image.${actualFormat}`);
+                            let baseName = 'edited_image';
+                            if (currentFile && currentFile.name) {
+                                const dotIdx = currentFile.name.lastIndexOf('.');
+                                baseName = dotIdx > 0 ? currentFile.name.slice(0, dotIdx) : currentFile.name;
+                                baseName = baseName.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 80) || 'edited_image';
+                                baseName = `${baseName}_edited`;
+                            }
+                            saveAs(result, `${baseName}.${actualFormat}`);
                             showToast(`Imagen descargada (${formatFileSize(result.size)})`, 'success');
                         },
                         error(err) {
@@ -1123,9 +1204,10 @@ document.addEventListener('DOMContentLoaded', function () {
             queueIfMatch(width - 1, y);
         }
 
-        // Paso 2: BFS - Procesar cola
-        while (queue.length > 0) {
-            const { x, y } = queue.shift();
+        // Paso 2: BFS - Procesar cola (head pointer O(1) en vez de shift O(n))
+        let head = 0;
+        while (head < queue.length) {
+            const { x, y } = queue[head++];
             const pixelIdx = getPixelIndex(x, y);
 
             // Marcar píxel como transparente
