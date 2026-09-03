@@ -49,14 +49,14 @@
             <div class="controls">
                 <div class="control-group">
                     <label for="quality">Calidad:</label>
-                    <input type="range" id="quality" min="1" max="100" value="90">
+                    <input type="range" id="quality" min="1" max="100" value="90" aria-valuemin="1" aria-valuemax="100" aria-valuenow="90" aria-label="Calidad de compresión">
                     <span id="qualityValue">90%</span>
                 </div>
                 <div class="control-group">
                     <label for="format">Formato:</label>
                     <select id="format">
                         <option value="jpeg">JPEG</option>
-                        <option value="png">PNG</option>
+                        <option value="png" selected>PNG</option>
                         <option value="webp">WEBP</option>
                     </select>
                 </div>
@@ -87,19 +87,19 @@
                     <div class="rotation-controls" role="group" aria-label="Controles de rotación y volteo">
                         <button type="button" id="rotateLeft" class="icon-btn" title="Rotar 90° izquierda (Ctrl+←)"
                             disabled aria-label="Rotar 90 grados a la izquierda">
-                            ↶
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                         </button>
                         <button type="button" id="rotateRight" class="icon-btn" title="Rotar 90° derecha (Ctrl+→)"
                             disabled aria-label="Rotar 90 grados a la derecha">
-                            ↷
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                         </button>
                         <button type="button" id="flipH" class="icon-btn" title="Voltear horizontal" disabled
                             aria-label="Voltear horizontalmente">
-                            ⇆
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7 5 5-5 5V7"/><path d="m21 7-5 5 5 5V7"/><path d="M12 20v2"/><path d="M12 14v2"/><path d="M12 8v2"/><path d="M12 2v2"/></svg>
                         </button>
                         <button type="button" id="flipV" class="icon-btn" title="Voltear vertical" disabled
                             aria-label="Voltear verticalmente">
-                            ⇅
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 3 5 5 5-5H7"/><path d="m7 21 5-5 5 5H7"/><path d="M20 12h2"/><path d="M14 12h2"/><path d="M8 12h2"/><path d="M2 12h2"/></svg>
                         </button>
                     </div>
                 </div>
@@ -133,13 +133,16 @@
                 </div>
                 <div class="control-group">
                     <label>Eliminar fondo:</label>
+                    <label class="checkbox-label" style="margin-bottom:8px;">
+                        <input type="checkbox" id="enableBgRemove"> Activar eliminación de fondo
+                    </label>
                     <div class="bg-remove-controls">
-                        <input type="color" id="bgColor" value="#ffffff">
-                        <input type="range" id="tolerance" min="0" max="100" value="10">
+                        <input type="color" id="bgColor" value="#ffffff" disabled aria-label="Color de fondo a eliminar">
+                        <input type="range" id="tolerance" min="0" max="100" value="10" disabled aria-valuemin="0" aria-valuemax="100" aria-valuenow="10" aria-label="Tolerancia de eliminación de fondo">
                         <span id="toleranceValue">10%</span>
                     </div>
                     <label class="checkbox-label">
-                        <input type="checkbox" id="edgesOnly" checked> Solo desde bordes (más preciso)
+                        <input type="checkbox" id="edgesOnly" checked disabled> Solo desde bordes (más preciso)
                     </label>
                 </div>
                 <div class="action-buttons" role="group" aria-label="Acciones principales">
@@ -151,12 +154,12 @@
                     </div>
                     <button type="button" id="compareBtn" class="secondary-btn"
                         title="Mantener presionado para comparar con original" disabled
-                        aria-label="Comparar con imagen original">👁 Comparar</button>
+                        aria-label="Comparar con imagen original"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></svg> Comparar</button>
                     <button type="button" id="resetBtn" class="secondary-btn danger"
-                        title="Resetear todos los cambios (Escape)" disabled aria-label="Resetear todos los cambios">🔄
+                        title="Resetear todos los cambios (Escape)" disabled aria-label="Resetear todos los cambios"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                         Resetear</button>
                     <button type="button" id="downloadBtn" title="Descargar imagen editada (Ctrl+S)" disabled
-                        aria-label="Descargar imagen editada">⬇ Descargar Imagen</button>
+                        aria-label="Descargar imagen editada"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> Descargar Imagen</button>
                 </div>
             </div>
         </div>
