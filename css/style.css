@@ -144,6 +144,53 @@ body {
     opacity: 0.5;
 }
 
+.gpu-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+    background: rgba(148, 163, 184, 0.12);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    padding: 3px 10px;
+    white-space: nowrap;
+    min-height: 24px;
+}
+
+.gpu-badge::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #94a3b8;
+    flex-shrink: 0;
+}
+
+.gpu-badge[data-backend="webgpu"] {
+    color: #a5b4fc;
+    border-color: rgba(99, 102, 241, 0.4);
+    background: rgba(99, 102, 241, 0.12);
+}
+
+.gpu-badge[data-backend="webgpu"]::before {
+    background: #22c55e;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
+}
+
+.gpu-badge[data-backend="webgl2"] {
+    color: #7dd3fc;
+    border-color: rgba(56, 189, 248, 0.35);
+    background: rgba(56, 189, 248, 0.1);
+}
+
+.gpu-badge[data-backend="webgl2"]::before {
+    background: #38bdf8;
+    box-shadow: 0 0 6px rgba(56, 189, 248, 0.8);
+}
+
 .header-btn {
     display: inline-flex;
     align-items: center;
@@ -701,6 +748,66 @@ input[type="range"]:disabled {
 .bg-remove-controls input[type="color"]::-moz-color-swatch {
     border: none;
     border-radius: 2px;
+}
+
+/* === AI BACKGROUND (local) === */
+
+.ai-block {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ai-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.ai-row {
+    display: flex;
+    gap: 6px;
+}
+
+.ai-btn {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
+.ai-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.45);
+}
+
+.ai-btn:disabled {
+    background: var(--bg-elevated);
+    box-shadow: none;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.ai-status {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    min-height: 1em;
+}
+
+.ai-status:empty {
+    display: none;
 }
 
 /* ==========================================================================

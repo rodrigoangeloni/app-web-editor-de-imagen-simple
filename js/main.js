@@ -17,7 +17,13 @@ document.addEventListener('DOMContentLoaded', function () {
         MAX_PIXELS: 25_000_000, // ~25MP, evita OOM en getImageData
         DEBOUNCE_DELAY: 100, // ms
         HISTORY_LIMIT: 20,
-        TOAST_DURATION: 3000 // ms
+        TOAST_DURATION: 3000, // ms
+        GPU_ENABLED: true, // WebGPU (export) + WebGL2 (preview), con fallback CPU
+        WORKER_ENABLED: true, // Pipeline pesado en Worker (export), con fallback sync
+        WORKER_TIMEOUT: 15000, // ms máx. espera al Worker antes de fallback CPU
+        AI_ENABLED: true, // Fondo con IA local (lazy-load, opt-in por clic)
+        AI_MAX_SIDE: 1024, // Cap inferencia IA (Vega 8 2GB: evita OOM)
+        AI_MODELS_URL: 'https://huggingface.co/models' // Info si falla la descarga
     };
 
     // ==================== REFERENCIAS DOM ====================
@@ -46,7 +52,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const saturationSlider = document.getElementById('saturation');
     const saturationValue = document.getElementById('saturationValue');
     const maskCanvas = document.getElementById('maskPreview');
-    const maskCtx = maskCanvas.getContext('2d');
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
 
     // Nuevos elementos UI
     const toastContainer = document.getElementById('toastContainer');
@@ -74,6 +80,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const filterGrayscaleBtn = document.getElementById('filterGrayscale');
     const filterSepiaBtn = document.getElementById('filterSepia');
     const filterInvertBtn = document.getElementById('filterInvert');
+
+    // GPU badge + IA controls (nuevos; pueden no existir en HTML cacheado)
+    const gpuBadge = document.getElementById('gpuBadge');
+    const aiBgBtn = document.getElementById('aiBgBtn');
+    const aiModelSelect = document.getElementById('aiModel');
+    const aiStatus = document.getElementById('aiStatus');
 
     /** @type {string} Filtro actualmente activo: 'none' | 'grayscale' | 'sepia' | 'invert' */
     let currentFilter = 'none';
@@ -113,6 +125,44 @@ document.addEventListener('DOMContentLoaded', function () {
 
     /** @type {boolean} Flag para evitar guardar estado durante undo/redo */
     let isUndoRedo = false;
+
+    /** @type {Worker|null} Worker de pipeline (lazy). Null si no disponible/falla */
+    let pipelineWorker = null;
+    let pipelineWorkerId = 0;
+    const pipelinePending = new Map();
+
+    /** @type {boolean} Máscara IA activa (se re-aplica tras cada ajuste de color) */
+    let aiMaskEnabled = false;
+    /** @type {HTMLCanvasElement|null} Máscara IA (solo alfa) al tamaño del recorte generado */
+    let aiMaskCanvas = null;
+    /** @type {string} Tamaño del recorte para el que se generó la máscara ("WxH") */
+    let aiMaskForSize = '';
+    /** @type {boolean} Inferencia IA en curso */
+    let aiRunning = false;
+
+    /** @type {CanvasPattern|null} Patrón damero cacheado para previsualizar transparencia */
+    let checkerPattern = null;
+
+    /**
+     * Damero de transparencia (16px, tonos del tema) para pintar bajo el preview.
+     * Sin esto, los píxeles con alfa=0 muestran el clon sin procesar de
+     * Cropper que hay debajo y el fondo eliminado "no se ve" en el preview
+     * aunque la descarga sí lo aplique.
+     * @returns {HTMLCanvasElement} Tile de 16×16
+     */
+    function getCheckerTile() {
+        if (getCheckerTile.tile) return getCheckerTile.tile;
+        const tile = document.createElement('canvas');
+        tile.width = 16; tile.height = 16;
+        const tctx = tile.getContext('2d');
+        tctx.fillStyle = '#141d31';
+        tctx.fillRect(0, 0, 16, 16);
+        tctx.fillStyle = '#232f45';
+        tctx.fillRect(0, 0, 8, 8);
+        tctx.fillRect(8, 8, 8, 8);
+        getCheckerTile.tile = tile;
+        return tile;
+    }
 
     // ==================== UTILIDADES UI ====================
 
@@ -243,7 +293,9 @@ document.addEventListener('DOMContentLoaded', function () {
             width: widthInput.value,
             height: heightInput.value,
             percent: percentInput.value,
-            keepAspect: keepAspect.checked
+            keepAspect: keepAspect.checked,
+            aiMaskEnabled: aiMaskEnabled,
+            aiModel: aiModelSelect ? aiModelSelect.value : 'modnet'
         };
 
         // Evitar duplicados: los eventos 'crop' de Cropper pueden disparar
@@ -305,6 +357,10 @@ document.addEventListener('DOMContentLoaded', function () {
         heightInput.value = state.height;
         percentInput.value = state.percent;
         keepAspect.checked = state.keepAspect;
+        // IA: restaurar flag y modelo; si no hay máscara en memoria se desactiva
+        if (aiModelSelect && state.aiModel) aiModelSelect.value = state.aiModel;
+        aiMaskEnabled = !!state.aiMaskEnabled && !!aiMaskCanvas;
+        updateAiUi();
 
         // Actualizar botones de filtro
         document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
@@ -649,6 +705,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         setLoading(false);
                         setControlsEnabled(true);
                         updateImageInfo();
+                        updateAiUi();
                         applyTransformations();
 
                         // Inicializar historial
@@ -712,6 +769,7 @@ document.addEventListener('DOMContentLoaded', function () {
         saturationSlider.setAttribute('aria-valuenow', '100');
         maskCanvas.style.display = 'none';
         setActiveFilter('none', true);
+        clearAiMask();
     }
 
     /**
@@ -840,6 +898,292 @@ document.addEventListener('DOMContentLoaded', function () {
         // Nota: no llamar a applyTransformations aquí; el caller usa debouncedApplyTransformations
     }
 
+    // ==================== MOTOR GPU + WORKER + IA ====================
+
+    /**
+     * Parámetros normalizados de la etapa de color (una sola fuente de verdad
+     * para CPU, WebGL2, WebGPU y Worker — evita divergencia preview/export).
+     * @returns {{brightness:number, contrastSlider:number, saturation:number, filter:string}}
+     */
+    function getFilterParams() {
+        return {
+            brightness: parseFloat(brightnessSlider.value) / 100,
+            contrastSlider: parseFloat(contrastSlider.value),
+            saturation: parseFloat(saturationSlider.value) / 100,
+            filter: currentFilter
+        };
+    }
+
+    /**
+     * Etapa de color en CPU (fallback y referencia). Mutates `data` in place.
+     * @param {Uint8ClampedArray} data Pixeles RGBA
+     * @param {{brightness:number, contrastSlider:number, saturation:number, filter:string}} params
+     */
+    function applyColorCPU(data, params) {
+        const contrastFactor = getContrastFactor(params.contrastSlider);
+        const filter = params.filter;
+        for (let i = 0; i < data.length; i += 4) {
+            let r = data[i] * params.brightness;
+            let g = data[i + 1] * params.brightness;
+            let b = data[i + 2] * params.brightness;
+            r = contrastFactor * (r - 128) + 128;
+            g = contrastFactor * (g - 128) + 128;
+            b = contrastFactor * (b - 128) + 128;
+            const gray = 0.2989 * r + 0.587 * g + 0.114 * b;
+            r = gray + params.saturation * (r - gray);
+            g = gray + params.saturation * (g - gray);
+            b = gray + params.saturation * (b - gray);
+            r = Math.max(0, Math.min(255, r));
+            g = Math.max(0, Math.min(255, g));
+            b = Math.max(0, Math.min(255, b));
+            if (filter === 'grayscale') {
+                const avg = (r + g + b) / 3;
+                r = g = b = avg;
+            } else if (filter === 'sepia') {
+                const nr = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
+                const ng = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
+                const nb = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
+                r = nr; g = ng; b = nb;
+            } else if (filter === 'invert') {
+                r = 255 - r; g = 255 - g; b = 255 - b;
+            }
+            data[i] = r; data[i + 1] = g; data[i + 2] = b;
+        }
+    }
+
+    /**
+     * Intenta la etapa de color en GPU WebGL2 (síncrona, ideal preview).
+     * Dibuja el resultado sobre workingCtx. Respeta `prefers-reduced-motion`?
+     * No: es cálculo de píxeles, sin animación — no aplica.
+     * @param {CanvasRenderingContext2D} workingCtx Destino (ya dimensionado)
+     * @param {HTMLCanvasElement} croppedCanvas Fuente recortada
+     * @param {{brightness:number, contrastSlider:number, saturation:number, filter:string}} params
+     * @returns {boolean} true si GPU pintó el frame
+     */
+    function tryGPUColorInto(workingCtx, croppedCanvas, params) {
+        if (!CONFIG.GPU_ENABLED || !window.GPUEngine) return false;
+        try {
+            const out = window.GPUEngine.applyColorGL(croppedCanvas, params);
+            if (!out) return false;
+            workingCtx.drawImage(out, 0, 0, workingCtx.canvas.width, workingCtx.canvas.height);
+            return true;
+        } catch (err) {
+            console.debug('[GPU] preview fallback a CPU:', err);
+            return false;
+        }
+    }
+
+    /**
+     * Crea (lazy) el Worker de pipeline y cablea respuestas.
+     * @returns {Worker|null}
+     */
+    function ensurePipelineWorker() {
+        if (!CONFIG.WORKER_ENABLED) return null;
+        if (pipelineWorker) return pipelineWorker;
+        try {
+            if (typeof Worker === 'undefined') return null;
+            const w = new Worker('js/pipeline.worker.js');
+            w.onmessage = (e) => {
+                const msg = e.data || {};
+                const pending = pipelinePending.get(msg.id);
+                if (!pending) return;
+                pipelinePending.delete(msg.id);
+                clearTimeout(pending.timer);
+                if (msg.ok) {
+                    pending.resolve(msg);
+                } else {
+                    pending.reject(new Error(msg.error || 'Worker falló'));
+                }
+            };
+            w.onerror = () => {
+                // Invalidar worker: próximas llamadas usan CPU sync
+                try { w.terminate(); } catch (e2) { /* noop */ }
+                pipelineWorker = null;
+                pipelinePending.forEach((p) => {
+                    clearTimeout(p.timer);
+                    p.reject(new Error('Worker error'));
+                });
+                pipelinePending.clear();
+            };
+            pipelineWorker = w;
+            return w;
+        } catch (err) {
+            console.debug('[Worker] no disponible, fallback CPU:', err);
+            return null;
+        }
+    }
+
+    /**
+     * Procesa ImageData en el Worker (color + bg clásico). Transfiere el buffer.
+     * @param {ImageData} imageData Datos a procesar (se neuteriza su buffer)
+     * @param {Object} workerParams {brightness, contrast, saturation, filter, bgEnabled, bgColor:{r,g,b}, tolerance, edgesOnly}
+     * @returns {Promise<{data:ArrayBuffer, width:number, height:number, hasAlpha:boolean}>}
+     */
+    function processViaWorker(imageData, workerParams) {
+        return new Promise((resolve, reject) => {
+            const w = ensurePipelineWorker();
+            if (!w) { reject(new Error('Worker no disponible')); return; }
+            const id = ++pipelineWorkerId;
+            const timer = setTimeout(() => {
+                pipelinePending.delete(id);
+                reject(new Error('Worker timeout'));
+            }, CONFIG.WORKER_TIMEOUT);
+            pipelinePending.set(id, { resolve, reject, timer });
+            // Transferir una copia (imageData original se conserva para fallback)
+            const copy = new Uint8ClampedArray(imageData.data);
+            w.postMessage({
+                id: id,
+                width: imageData.width,
+                height: imageData.height,
+                data: copy.buffer,
+                params: workerParams
+            }, [copy.buffer]);
+        });
+    }
+
+    /**
+     * Actualiza el badge de backend en el header.
+     * @param {string} backend 'webgpu'|'webgl2'|'cpu'
+     * @param {string} [label] Etiqueta larga para tooltip
+     */
+    function updateGpuBadge(backend, label) {
+        if (!gpuBadge) return;
+        gpuBadge.dataset.backend = backend;
+        gpuBadge.textContent = backend === 'webgpu' ? 'GPU · WebGPU'
+            : backend === 'webgl2' ? 'GPU · WebGL2' : 'CPU';
+        gpuBadge.title = label || gpuBadge.textContent;
+    }
+
+    /** Refresca estado del botón/estado IA según imagen y proceso en curso. */
+    function updateAiUi() {
+        if (aiBgBtn) aiBgBtn.disabled = !cropper || !cropper.ready || aiRunning;
+        if (aiModelSelect && window.AIBackground && aiModelSelect.value !== window.AIBackground.getModel()) {
+            try { window.AIBackground.setModel(aiModelSelect.value); } catch (e) { /* noop */ }
+        }
+    }
+
+    /** @param {string} text */
+    function setAiStatus(text) {
+        if (aiStatus) aiStatus.textContent = text || '';
+    }
+
+    /** Limpia la máscara IA y su UI. */
+    function clearAiMask() {
+        aiMaskEnabled = false;
+        aiMaskCanvas = null;
+        aiMaskForSize = '';
+        setAiStatus('');
+        updateAiUi();
+    }
+
+    /**
+     * Construye canvas solo-color (sin bg) desde el recorte actual.
+     * Reusado por preview, IA y export para no duplicar lógica.
+     * @param {HTMLCanvasElement} croppedCanvas Recorte de Cropper
+     * @returns {HTMLCanvasElement}
+     */
+    function buildColorOnlyCanvas(croppedCanvas) {
+        const c = document.createElement('canvas');
+        c.width = croppedCanvas.width;
+        c.height = croppedCanvas.height;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        const params = getFilterParams();
+        if (!tryGPUColorInto(ctx, croppedCanvas, params)) {
+            ctx.drawImage(croppedCanvas, 0, 0);
+            const img = ctx.getImageData(0, 0, c.width, c.height);
+            applyColorCPU(img.data, params);
+            ctx.putImageData(img, 0, 0);
+        }
+        return c;
+    }
+
+    /**
+     * Aplica la máscara IA (alfa) sobre un ImageData ya con color.
+     * @param {ImageData} imageData Destino (se muta el canal alfa)
+     */
+    function applyAiMaskInPlace(imageData) {
+        if (!aiMaskEnabled || !aiMaskCanvas) return false;
+        if (aiMaskCanvas.width !== imageData.width || aiMaskCanvas.height !== imageData.height) return false;
+        const mctx = aiMaskCanvas.getContext('2d', { willReadFrequently: true });
+        let maskData;
+        try {
+            maskData = mctx.getImageData(0, 0, aiMaskCanvas.width, aiMaskCanvas.height);
+        } catch (err) {
+            return false;
+        }
+        const d = imageData.data, m = maskData.data;
+        for (let i = 3; i < d.length; i += 4) {
+            // La máscara IA es RGBA sobre fondo: usar su alfa; si el modelo
+            // devolvió RGB opaco con fondo negro, el alfa ya viene compuesto.
+            d[i] = Math.min(d[i], m[i]);
+        }
+        return true;
+    }
+
+    /**
+     * Flujo IA: genera máscara desde el canvas con color y la activa.
+     * Lazy-load del runtime (~MBs) solo aquí; la imagen nunca sale del PC.
+     */
+    async function handleAiBackground() {
+        if (!cropper || !cropper.ready || aiRunning) return;
+        if (!CONFIG.AI_ENABLED || !window.AIBackground) {
+            showToast('IA no disponible en este build', 'warning');
+            return;
+        }
+        const cropped = cropper.getCroppedCanvas();
+        if (!cropped) { showToast('Error al procesar la imagen', 'error'); return; }
+        aiRunning = true;
+        updateAiUi();
+        setLoading(true, 'Cargando modelo IA (solo la primera vez)...');
+        setAiStatus('Cargando modelo IA…');
+        try {
+            const modelKey = aiModelSelect ? aiModelSelect.value : 'modnet';
+            const colored = buildColorOnlyCanvas(cropped);
+            setLoading(true, 'Recortando sujeto con IA en tu GPU…');
+            setAiStatus('Procesando con IA…');
+            const t0 = performance.now();
+            const result = await window.AIBackground.removeBackground(colored, {
+                model: modelKey,
+                maxSide: CONFIG.AI_MAX_SIDE,
+                onProgress: (stage, pct) => {
+                    if (stage === 'descargando-modelo') {
+                        setLoading(true, `Descargando modelo IA ${pct}% (una sola vez)…`);
+                        setAiStatus(`Descargando modelo ${pct}%…`);
+                    }
+                }
+            });
+            // Extraer solo el alfa como máscara reutilizable ante cambios de sliders
+            aiMaskCanvas = document.createElement('canvas');
+            aiMaskCanvas.width = cropped.width;
+            aiMaskCanvas.height = cropped.height;
+            const actx = aiMaskCanvas.getContext('2d');
+            actx.clearRect(0, 0, aiMaskCanvas.width, aiMaskCanvas.height);
+            actx.drawImage(result, 0, 0, aiMaskCanvas.width, aiMaskCanvas.height);
+            aiMaskForSize = `${cropped.width}x${cropped.height}`;
+            aiMaskEnabled = true;
+            const ms = Math.round(performance.now() - t0);
+            const prov = window.AIBackground.getProvider();
+            setAiStatus(`IA aplicada en ${ms} ms (${prov})`);
+            showToast(`Fondo IA aplicado en ${ms} ms`, 'success');
+            applyTransformations();
+            saveState();
+        } catch (err) {
+            console.error(err);
+            const msg = (err && err.message) || String(err);
+            if (/fetch|network|descarga|CDN/i.test(msg)) {
+                showToast('Sin conexión para descargar el modelo IA. El fondo clásico sigue disponible.', 'error');
+                setAiStatus('Sin conexión: usa el fondo clásico.');
+            } else {
+                showToast('IA falló: ' + msg, 'error');
+                setAiStatus('Error IA. Reintenta o usa fondo clásico.');
+            }
+        } finally {
+            aiRunning = false;
+            setLoading(false);
+            updateAiUi();
+        }
+    }
+
     /**
      * Aplica todas las transformaciones seleccionadas en tiempo real.
      * Crea un canvas temporal, procesa píxeles (brillo, contraste, saturación, filtros, bg removal)
@@ -864,69 +1208,22 @@ document.addEventListener('DOMContentLoaded', function () {
         const workingCanvas = document.createElement('canvas');
         workingCanvas.width = croppedCanvas.width;
         workingCanvas.height = croppedCanvas.height;
-        const workingCtx = workingCanvas.getContext('2d');
+        const workingCtx = workingCanvas.getContext('2d', { willReadFrequently: true });
+        const params = getFilterParams();
 
-        // Draw the cropped image to our working canvas
-        workingCtx.drawImage(croppedCanvas, 0, 0);
-
-        // Get the image data for manipulation
-        const imageData = workingCtx.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
-        const data = imageData.data;
-
-        // 1. Apply brightness
-        const brightnessLevel = parseFloat(brightnessSlider.value) / 100;
-
-        // 2. Apply contrast (mapeado 0-200 -> factor neutral en 100)
-        const contrastFactor = getContrastFactor(parseFloat(contrastSlider.value));
-
-        // 3. Apply saturation
-        const saturationLevel = parseFloat(saturationSlider.value) / 100;
-
-        // Ajustes + filtros en una sola pasada (perf: evita 2 loops)
-        const filter = currentFilter;
-        for (let i = 0; i < data.length; i += 4) {
-            let r = data[i];
-            let g = data[i + 1];
-            let b = data[i + 2];
-
-            // Brightness
-            r *= brightnessLevel;
-            g *= brightnessLevel;
-            b *= brightnessLevel;
-
-            // Contrast
-            r = contrastFactor * (r - 128) + 128;
-            g = contrastFactor * (g - 128) + 128;
-            b = contrastFactor * (b - 128) + 128;
-
-            // Saturation
-            const gray = 0.2989 * r + 0.587 * g + 0.114 * b;
-            r = gray + saturationLevel * (r - gray);
-            g = gray + saturationLevel * (g - gray);
-            b = gray + saturationLevel * (b - gray);
-
-            r = Math.max(0, Math.min(255, r));
-            g = Math.max(0, Math.min(255, g));
-            b = Math.max(0, Math.min(255, b));
-
-            // Filtros (sobre valores ya ajustados)
-            if (filter === 'grayscale') {
-                const avg = (r + g + b) / 3;
-                r = g = b = avg;
-            } else if (filter === 'sepia') {
-                const nr = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
-                const ng = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
-                const nb = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
-                r = nr; g = ng; b = nb;
-            } else if (filter === 'invert') {
-                r = 255 - r;
-                g = 255 - g;
-                b = 255 - b;
-            }
-
-            data[i] = r;
-            data[i + 1] = g;
-            data[i + 2] = b;
+        // Etapa color: GPU WebGL2 sync si disponible, si no CPU (misma matemática)
+        let imageData;
+        let data;
+        if (tryGPUColorInto(workingCtx, croppedCanvas, params)) {
+            imageData = workingCtx.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
+            data = imageData.data;
+        } else {
+            // Draw the cropped image to our working canvas
+            workingCtx.drawImage(croppedCanvas, 0, 0);
+            // Get the image data for manipulation
+            imageData = workingCtx.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
+            data = imageData.data;
+            applyColorCPU(data, params);
         }
 
         // 5. Apply Background Removal preview (only if enabled)
@@ -943,6 +1240,19 @@ document.addEventListener('DOMContentLoaded', function () {
                         data[i + 3] = 0;
                     }
                 }
+            }
+        }
+
+        // 5b. Máscara IA (si está activa): invalida si cambió el tamaño de recorte
+        if (aiMaskEnabled && aiMaskCanvas) {
+            if (aiMaskCanvas.width !== workingCanvas.width || aiMaskCanvas.height !== workingCanvas.height) {
+                aiMaskEnabled = false;
+                aiMaskCanvas = null;
+                aiMaskForSize = '';
+                setAiStatus('Recorte cambiado: re-ejecuta la IA.');
+                showToast('Recorte cambiado: re-ejecuta el fondo IA', 'warning');
+            } else {
+                applyAiMaskInPlace(imageData);
             }
         }
 
@@ -964,8 +1274,16 @@ document.addEventListener('DOMContentLoaded', function () {
         maskCanvas.style.display = 'block';
         maskCanvas.style.zIndex = '10';
 
-        // Clear and draw the processed image to the mask canvas
+        // Clear and draw the processed image to the mask canvas.
+        // El damero va DEBAJO: donde hay alfa=0 (fondo eliminado clásico o IA)
+        // se ven cuadros en vez del clon sin procesar de Cropper. El export no
+        // usa este canvas, así que conserva el alfa real.
         maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        if (!checkerPattern) {
+            checkerPattern = maskCtx.createPattern(getCheckerTile(), 'repeat');
+        }
+        maskCtx.fillStyle = checkerPattern;
+        maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
         maskCtx.drawImage(workingCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
     }
 
@@ -983,7 +1301,7 @@ document.addEventListener('DOMContentLoaded', function () {
         setLoading(true, 'Procesando imagen...');
 
         // Usar setTimeout para permitir que el UI se actualice
-        setTimeout(() => {
+        setTimeout(async () => {
             try {
                 let canvasToDownload = cropper.getCroppedCanvas();
                 if (!canvasToDownload) {
@@ -1027,89 +1345,122 @@ document.addEventListener('DOMContentLoaded', function () {
                     canvasToDownload = tempResizeCanvas;
                 }
 
-                const ctx = canvasToDownload.getContext('2d');
-                const imageData = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
-                const data = imageData.data;
+                const params = getFilterParams();
+                const ctx = canvasToDownload.getContext('2d', { willReadFrequently: true });
 
-                // 2. Apply brightness, contrast, saturation + filters en una sola pasada
-                const brightnessLevel = parseFloat(brightnessSlider.value) / 100;
-                const contrastFactor = getContrastFactor(parseFloat(contrastSlider.value));
-                const saturationLevel = parseFloat(saturationSlider.value) / 100;
-                const filter = currentFilter;
-
-                for (let i = 0; i < data.length; i += 4) {
-                    let r = data[i];
-                    let g = data[i + 1];
-                    let b = data[i + 2];
-
-                    // Brightness
-                    r *= brightnessLevel;
-                    g *= brightnessLevel;
-                    b *= brightnessLevel;
-
-                    // Contrast
-                    r = contrastFactor * (r - 128) + 128;
-                    g = contrastFactor * (g - 128) + 128;
-                    b = contrastFactor * (b - 128) + 128;
-
-                    // Saturation
-                    const gray = 0.2989 * r + 0.587 * g + 0.114 * b;
-                    r = gray + saturationLevel * (r - gray);
-                    g = gray + saturationLevel * (g - gray);
-                    b = gray + saturationLevel * (b - gray);
-
-                    r = Math.max(0, Math.min(255, r));
-                    g = Math.max(0, Math.min(255, g));
-                    b = Math.max(0, Math.min(255, b));
-
-                    // Filtros
-                    if (filter === 'grayscale') {
-                        const avg = (r + g + b) / 3;
-                        r = g = b = avg;
-                    } else if (filter === 'sepia') {
-                        const nr = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
-                        const ng = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
-                        const nb = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
-                        r = nr; g = ng; b = nb;
-                    } else if (filter === 'invert') {
-                        r = 255 - r;
-                        g = 255 - g;
-                        b = 255 - b;
+                // Ruta 1 (preferida en imgs. grandes): Worker off-main-thread
+                // hace color + fondo clásico juntos con el mismo math que CPU.
+                let colorDone = false;
+                let classicBgDone = false;
+                // Tamaño primero: evita crear el Worker en imgs. pequeñas (overhead).
+                const bigEnough = (canvasToDownload.width * canvasToDownload.height) >= 500 * 500;
+                const useWorker = CONFIG.WORKER_ENABLED && bigEnough && ensurePipelineWorker();
+                if (useWorker) {
+                    try {
+                        const srcData = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
+                        const res = await processViaWorker(srcData, {
+                            brightness: params.brightness * 100,
+                            contrast: params.contrastSlider,
+                            saturation: params.saturation * 100,
+                            filter: params.filter,
+                            bgEnabled: enableBgRemoveCheckbox.checked,
+                            bgColor: hexToRgb(bgColorInput.value),
+                            tolerance: parseInt(toleranceInput.value, 10),
+                            edgesOnly: edgesOnlyCheckbox.checked
+                        });
+                        ctx.putImageData(new ImageData(new Uint8ClampedArray(res.data), res.width, res.height), 0, 0);
+                        colorDone = true;
+                        classicBgDone = true;
+                    } catch (werr) {
+                        console.debug('[Worker] export fallback a GPU/CPU:', werr);
                     }
-
-                    data[i] = r;
-                    data[i + 1] = g;
-                    data[i + 2] = b;
                 }
 
-                // 3. Background Removal (final) — only if enabled, sobre el mismo ImageData
-                let actualFormat = formatSelect.value;
-                let hasTransparentPixels = false;
+                // Ruta 2: WebGPU compute para la etapa de color (async, ideal export).
+                if (!colorDone && CONFIG.GPU_ENABLED && window.GPUEngine && window.GPUEngine.getBackend() === 'webgpu') {
+                    try {
+                        const gpuOut = await window.GPUEngine.applyColorWebGPU(canvasToDownload, params);
+                        if (gpuOut) {
+                            ctx.clearRect(0, 0, canvasToDownload.width, canvasToDownload.height);
+                            ctx.drawImage(gpuOut, 0, 0);
+                            colorDone = true;
+                        }
+                    } catch (gerr) {
+                        console.debug('[GPU] export WebGPU fallback a CPU:', gerr);
+                    }
+                }
 
-                if (enableBgRemoveCheckbox.checked) {
+                // Ruta 3: CPU de referencia (idéntica matemática que preview sin GPU).
+                const imageData = ctx.getImageData(0, 0, canvasToDownload.width, canvasToDownload.height);
+                const data = imageData.data;
+                if (!colorDone) {
+                    applyColorCPU(data, params);
+                }
+
+                // Fondo clásico (si está activo y el Worker no lo hizo ya).
+                if (enableBgRemoveCheckbox.checked && !classicBgDone) {
                     const targetColor = hexToRgb(bgColorInput.value);
-                    const tolValue = parseInt(toleranceInput.value);
-
+                    const tolValue = parseInt(toleranceInput.value, 10);
                     if (edgesOnlyCheckbox.checked) {
                         removeBackgroundFromEdges(imageData, targetColor, tolValue);
-                        for (let i = 3; i < data.length; i += 4) {
-                            if (data[i] === 0) { hasTransparentPixels = true; break; }
-                        }
                     } else {
                         for (let i = 0; i < data.length; i += 4) {
-                            const pixelColor = { r: data[i], g: data[i + 1], b: data[i + 2] };
-                            if (isColorSimilar(targetColor, pixelColor, tolValue)) {
+                            if (isColorSimilar(targetColor, { r: data[i], g: data[i + 1], b: data[i + 2] }, tolValue)) {
                                 data[i + 3] = 0;
-                                hasTransparentPixels = true;
                             }
                         }
                     }
-                    if (hasTransparentPixels) actualFormat = 'png';
+                }
+
+                // Máscara IA escalada al tamaño final de export.
+                if (aiMaskEnabled && aiMaskCanvas) {
+                    const scaled = document.createElement('canvas');
+                    scaled.width = canvasToDownload.width;
+                    scaled.height = canvasToDownload.height;
+                    scaled.getContext('2d').drawImage(aiMaskCanvas, 0, 0, scaled.width, scaled.height);
+                    const savedMask = aiMaskCanvas;
+                    aiMaskCanvas = scaled;
+                    applyAiMaskInPlace(imageData);
+                    aiMaskCanvas = savedMask;
+                }
+
+                // Un solo escaneo alfa decide PNG forzado (cubre clásico + IA).
+                let actualFormat = formatSelect.value;
+                let hasTransparentPixels = false;
+                for (let i = 3; i < data.length; i += 4) {
+                    if (data[i] === 0) { hasTransparentPixels = true; break; }
+                }
+                if (hasTransparentPixels && actualFormat !== 'png') {
+                    actualFormat = 'png';
+                    showToast('Transparencia detectada: exportando como PNG', 'info');
                 }
                 ctx.putImageData(imageData, 0, 0);
 
                 // --- Compression and Download ---
                 const mimeType = `image/${actualFormat}`;
+                const saveBlobWithName = (blob) => {
+                    let baseName = 'edited_image';
+                    if (currentFile && currentFile.name) {
+                        const dotIdx = currentFile.name.lastIndexOf('.');
+                        baseName = dotIdx > 0 ? currentFile.name.slice(0, dotIdx) : currentFile.name;
+                        baseName = baseName.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 80) || 'edited_image';
+                        baseName = `${baseName}_edited`;
+                    }
+                    saveAs(blob, `${baseName}.${actualFormat}`);
+                    showToast(`Imagen descargada (${formatFileSize(blob.size)})`, 'success');
+                };
+                // AVIF: Compressor.js no lo soporta de forma fiable → blob nativo directo.
+                if (actualFormat === 'avif') {
+                    canvasToDownload.toBlob((blob) => {
+                        setLoading(false);
+                        if (!blob) {
+                            showToast('Tu navegador no puede codificar AVIF. Elige WEBP o PNG.', 'error');
+                            return;
+                        }
+                        saveBlobWithName(blob);
+                    }, 'image/avif', qualitySlider.value / 100);
+                    return;
+                }
                 canvasToDownload.toBlob((blob) => {
                     if (!blob) {
                         setLoading(false);
@@ -1121,15 +1472,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         mimeType: mimeType,
                         success(result) {
                             setLoading(false);
-                            let baseName = 'edited_image';
-                            if (currentFile && currentFile.name) {
-                                const dotIdx = currentFile.name.lastIndexOf('.');
-                                baseName = dotIdx > 0 ? currentFile.name.slice(0, dotIdx) : currentFile.name;
-                                baseName = baseName.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 80) || 'edited_image';
-                                baseName = `${baseName}_edited`;
-                            }
-                            saveAs(result, `${baseName}.${actualFormat}`);
-                            showToast(`Imagen descargada (${formatFileSize(result.size)})`, 'success');
+                            saveBlobWithName(result);
                         },
                         error(err) {
                             setLoading(false);
@@ -1294,4 +1637,36 @@ document.addEventListener('DOMContentLoaded', function () {
         const db = target.b - actual.b;
         return (dr * dr + dg * dg + db * db) <= (tolerance * tolerance);
     }
+
+    // ==================== INIT GPU + IA ====================
+
+    // Badge de backend: WebGPU (async) > WebGL2 (sync) > CPU. No bloquea la UI.
+    if (gpuBadge) {
+        updateGpuBadge('cpu', 'Detectando GPU…');
+        if (CONFIG.GPU_ENABLED && window.GPUEngine) {
+            window.GPUEngine.init().then((backend) => {
+                updateGpuBadge(backend, window.GPUEngine.getLabel());
+                if (backend !== 'cpu' && cropper && cropper.ready) {
+                    applyTransformations(); // re-render con GPU si ya había imagen
+                }
+            }).catch(() => updateGpuBadge('cpu', 'CPU (GPU no disponible)'));
+        }
+    }
+
+    // Botón IA + selector de modelo
+    if (aiBgBtn) {
+        aiBgBtn.addEventListener('click', handleAiBackground);
+    }
+    if (aiModelSelect) {
+        aiModelSelect.addEventListener('change', () => {
+            if (window.AIBackground) window.AIBackground.setModel(aiModelSelect.value);
+            // Cambiar de modelo invalida la máscara generada con otro modelo
+            if (aiMaskEnabled) {
+                clearAiMask();
+                applyTransformations();
+                showToast('Modelo IA cambiado: genera la máscara de nuevo', 'info');
+            }
+        });
+    }
+    updateAiUi();
 });

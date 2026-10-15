@@ -4,6 +4,39 @@ Registro de cambios significativos en el proyecto.
 
 ---
 
+## [2.1.0] - 2026-10-15
+
+### ✨ Nuevas Funcionalidades
+
+#### Aceleración GPU (WebGPU + WebGL2, con fallback CPU)
+- Etapa de color (brillo/contraste/saturación + grises/sepia/invertir) en un único shader: WebGL2 síncrono para preview en tiempo real, WebGPU compute (WGSL) para export.
+- Detección automática al arrancar: WebGPU > WebGL2 > CPU, con badge en el header (`GPU · WebGPU` / `GPU · WebGL2` / `CPU`).
+- Misma matemática que el path CPU (verificado <1 LSB); preview y export ya no duplican lógica de color (`getFilterParams()` como fuente única).
+- Nuevos archivos: `js/gpu.js` (motor), sin dependencias, zero-build intacto.
+
+#### Pipeline en Web Worker
+- Export de imágenes ≥500×500px procesado en `js/pipeline.worker.js` (color + fondo clásico fuera del hilo principal, buffer transferible).
+- Timeout de 15 s con fallback automático a CPU; imágenes pequeñas siguen ruta síncrona (sin overhead).
+
+#### Eliminación de fondo con IA local (beta)
+- Botón "Quitar fondo con IA" (sección Fondo): MODNet (~26 MB, Apache-2.0) por defecto y RMBG-1.4 (~45 MB, licencia solo no-comercial) opcional, vía Transformers.js, inferencia 100% en el dispositivo (nada se sube).
+- Lazy-load del runtime solo al primer clic; cap de inferencia a 1024 px (evita OOM en iGPU 2 GB); la máscara se re-aplica al mover sliders y se invalida al cambiar el recorte.
+- Nuevo archivo: `js/ai-bg.js`. Integrado en historial (undo/redo) y reset.
+
+#### Exportación AVIF
+- Nuevo formato AVIF en el selector (ruta nativa `toBlob`, sin Compressor.js); PNG forzado si hay transparencia (también con máscara IA).
+
+### ⚡ Mejoras
+- Export: un solo escaneo de alfa decide el PNG forzado (cubre fondo clásico + IA).
+- Toast informativo al cambiar de modelo IA o al invalidarse la máscara por recorte.
+
+### 🐛 Correcciones
+- **Preview de transparencia**: el fondo eliminado (clásico o IA) ahora se previsualiza sobre damero dentro de `#maskPreview`. Antes, los píxeles con alfa=0 dejaban ver el clon sin procesar de Cropper y parecía que no pasaba nada (la descarga siempre fue correcta).
+- Palabra reservada WGSL (`filter` → `filterMode`): el shader WebGPU no compilaba y caía en silencio a CPU; ahora verifica `getCompilationInfo()`.
+- Runtime IA: Transformers.js v2 no registra `modnet` y su dist no es UMD → migrado a v3 (`@huggingface/transformers`) con `AutoModel`/`AutoProcessor` directos y `import()` dinámico.
+
+---
+
 ## [2.0.0] - 2025-12-03
 
 ### ✨ Nuevas Funcionalidades

@@ -13,7 +13,10 @@ processAndDownload() → setLoading() → redimensionar → transformaciones →
 ```
 
 **Archivos clave:**
-- `js/main.js` — Lógica en closure `DOMContentLoaded`. Estado: `cropper`, `currentFile`, `originalImage`, `currentFilter`, `historyStack`, `scaleX/Y`
+- `js/main.js` — Lógica en closure `DOMContentLoaded`. Estado: `cropper`, `currentFile`, `originalImage`, `currentFilter`, `historyStack`, `scaleX/Y` + IA: `aiMaskEnabled`, `aiMaskCanvas`, `aiMaskForSize`
+- `js/gpu.js` — Script clásico que expone `window.GPUEngine`: detección WebGPU > WebGL2 > CPU, `applyColorGL()` (sync, preview), `applyColorWebGPU()` (async, export), `bench()`, badge `#gpuBadge`
+- `js/ai-bg.js` — Script clásico que expone `window.AIBackground`: Transformers.js **v3** vía `import()` dinámico (`+esm`), `AutoModel`+`AutoProcessor` directos con device WebGPU y fallback WASM, modelos MODNet (Apache-2.0) y RMBG-1.4 (no-comercial)
+- `js/pipeline.worker.js` — Worker sin DOM: misma matemática de color + fondo clásico, buffer transferible, timeout 15 s con fallback CPU
 - `index.html` — Librerías CDN, estructura DOM con IDs, atributos ARIA
 - `css/style.css` — Secciones con headers `/* === SECTION === */`, responsive @768px
 
@@ -28,6 +31,17 @@ debounceTimer
 ```
 
 ## Convenciones Críticas
+
+**Etapa de color unificada (no duplicar lógica):**
+- `getFilterParams()` en `main.js` es la única fuente de verdad `{brightness, contrastSlider, saturation, filter}` para CPU (`applyColorCPU`), WebGL2 (`GPUEngine.applyColorGL`), WebGPU (`GPUEngine.applyColorWebGPU`) y Worker.
+- Preview = WebGL2 sync sobre `#maskPreview` **con damero debajo** (los alfa=0 mostrarían el clon sin procesar de Cropper si no). Export = Worker (≥500×500) → WebGPU → CPU. El export nunca usa el canvas del preview: conserva el alfa real.
+- Fondo IA: `handleAiBackground()` genera `aiMaskCanvas` una vez y `applyAiMaskInPlace()` la re-aplica tras cada ajuste; cambiar el recorte la invalida. Va en `saveState`/`restoreState`/`resetControls` como `aiMaskEnabled` (+ `aiModel`).
+
+**Glosario de trampas GPU/IA (verificadas en navegador):**
+- WGSL: `filter` es palabra reservada (usar `filterMode`); `gpu.js` verifica `getCompilationInfo()` y cae a CPU con `console.debug`.
+- Transformers v2 dist NO es UMD y su `image-segmentation` no registra `modnet` → usar **v3 `+esm` con `import()`** y `AutoModel`/`AutoProcessor` directos; MODNet espera entrada **`{input: pixel_values}`**; `RawImage.fromCanvas` es **síncrono** en v3 (envolver con `Promise.resolve`).
+- Canvas WebGL ≠ canvas 2D: para leer píxeles de un canvas WebGL hay que dibujarlo antes en otro canvas 2D.
+- `UNPACK_FLIP_Y_WEBGL` debe quedarse en `false` con nuestro vertex shader (si no, sale boca abajo).
 
 **JavaScript:**
 - camelCase para variables/funciones, IDs en HTML (`#downloadBtn`, `#imagePreview`)
@@ -128,8 +142,8 @@ python -m http.server 8000  # o: npx http-server -p 8000
 ## Restricciones
 
 - **Límite 10MB** en `handleFileSelect()` (configurable en `CONFIG`)
-- **PNG forzado** si hay transparencia (`processAndDownload`)
-- **Procesamiento síncrono** — imágenes >4000x4000 pueden bloquear UI
+- **PNG forzado** si hay transparencia (`processAndDownload`; cubre fondo clásico + IA; AVIF usa ruta nativa `toBlob` sin Compressor.js)
+- **Procesamiento**: preview color en GPU sync (WebGL2) + fondo CPU sync; export pesado en Worker (≥500×500 px, timeout 15 s) o WebGPU async, con fallback CPU. `willReadFrequently: true` en contextos 2D con lecturas repetidas
 - **Historial máximo** — 20 estados (configurable en `CONFIG.HISTORY_LIMIT`)
 - **Sin tests automatizados** — testing manual requerido (ver `CONTRIBUTING.md`)
 

@@ -33,6 +33,7 @@
                     <span class="info-sep">|</span>
                     <span id="infoFormat">-</span>
                 </div>
+                <span id="gpuBadge" class="gpu-badge" title="Backend de procesamiento activo" aria-live="polite">CPU</span>
                 <button type="button" id="uploadBtn" class="header-btn" title="Cargar imagen"
                     aria-label="Cargar nueva imagen">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
@@ -78,6 +79,7 @@
                                     <option value="jpeg">JPEG</option>
                                     <option value="png" selected>PNG</option>
                                     <option value="webp">WEBP</option>
+                                    <option value="avif">AVIF</option>
                                 </select>
                             </div>
                             <div class="control-row">
@@ -224,6 +226,20 @@
                             <label class="checkbox-label compact">
                                 <input type="checkbox" id="edgesOnly" checked disabled> Solo bordes (más preciso)
                             </label>
+                            <div class="ai-block">
+                                <label for="aiModel" class="ai-label">Fondo con IA (local, beta)</label>
+                                <div class="ai-row">
+                                    <select id="aiModel" aria-label="Modelo de IA para fondo">
+                                        <option value="modnet">MODNet · rápido</option>
+                                        <option value="rmbg">RMBG-1.4 · general*</option>
+                                    </select>
+                                </div>
+                                <button type="button" id="aiBgBtn" class="ai-btn" disabled
+                                    aria-label="Eliminar fondo con IA en local">
+                                    Quitar fondo con IA
+                                </button>
+                                <p id="aiStatus" class="ai-status" role="status" aria-live="polite"></p>
+                            </div>
                         </div>
                     </section>
                 </div>
@@ -261,6 +277,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/compressorjs/1.1.1/compressor.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="js/gpu.js"></script>
+    <script src="js/ai-bg.js"></script>
     <script src="js/main.js"></script>
 </body>
 
